@@ -3,7 +3,10 @@ import Layout from '../layouts/Layout.astro'
 ---
 <Layout title="Home">
   <main>
-    <h1>Albert Ahnfelt</h1>
+    <div class="title">
+      <h1 class="name">Albert</h1>
+      <div class="circle"></div>
+    </div>
   </main>
 </Layout>
 
@@ -13,10 +16,31 @@ import Layout from '../layouts/Layout.astro'
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0 2rem;
   }
 
-  h1 {
-    font-size: clamp(2rem, 6vw, 6rem);
-  }
+main {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.title {
+  position: relative; /* dot is the origin */
+}
+
+.circle {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.name {
+  position: absolute;
+  font-size: clamp(3rem, 18vw, 50rem);
+  top: 50%;
+  left: 50%;
+  transform: scaleX(0.7) translate(-126%, -66%);
+}
 </style>
