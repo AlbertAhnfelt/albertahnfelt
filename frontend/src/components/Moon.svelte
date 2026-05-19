@@ -1,0 +1,13 @@
+<svg width="248" height="235" viewBox="0 0 248 235" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="118.433" cy="117.5" rx="118.433" ry="117.5" fill="black"/>
+  <ellipse cx="129.567" cy="117.5" rx="118.433" ry="117.5" fill="black"/>
+  <rect x="112.359" width="12.1469" height="235" fill="black"/>
+  <circle cx="117" cy="117" r="114" fill="#EFEDEA"/>
+</svg>
+
+<style>
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+</style>
