@@ -5,7 +5,6 @@
     let cursorEl;
     let cursorX = 0, cursorY = 0;
     let locked = false;
-    let gsap;
 
     const WHITE_CX = 117, WHITE_CY = 117, WHITE_R = 114;
     const BLACK_CX = 120, BLACK_CY = 117, BLACK_R = 119;
@@ -33,8 +32,14 @@
     let whitePath = buildDentPath(WHITE_CX, WHITE_CY, WHITE_R, 0, 0);
     let blackPath = buildDentPath(BLACK_CX, BLACK_CY, BLACK_R, 0, 0);
 
+    function setDent(angle, depth) {
+        whitePath = buildDentPath(WHITE_CX, WHITE_CY, WHITE_R, angle, depth);
+        blackPath = buildDentPath(BLACK_CX, BLACK_CY, BLACK_R, angle, depth);
+    }
+
     function render() {
-        gsap.set(cursorEl, { x: cursorX, y: cursorY, opacity: locked ? 1 : 0 });
+        cursorEl.style.transform = `translate(${cursorX}px, ${cursorY}px)`;
+        cursorEl.style.opacity = locked ? 1 : 0;
     }
 
     function onMouseMove(e) {
@@ -43,10 +48,10 @@
         const rect = svg.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
-        const moonR = (114 / 117.5) * (rect.height / 2);
+        const moonR = WHITE_R * rect.height / 235;
 
         const toCenterX = cx - cursorX, toCenterY = cy - cursorY;
-        const dist = Math.sqrt(toCenterX * toCenterX + toCenterY * toCenterY);
+        const dist = Math.hypot(toCenterX, toCenterY);
         const r = dist / moonR;
 
         let mx = e.movementX, my = e.movementY;
@@ -55,12 +60,9 @@
             const nx = toCenterX / dist, ny = toCenterY / dist;
             const inward = mx * nx + my * ny;
             if (inward > 0) {
-                const baseResistance = Math.min(1, 0.8 + (1 - r) * 0.4);
-                const tangX = mx - inward * nx;
-                const tangY = my - inward * ny;
-                const newInward = inward * (1 - baseResistance);
-                mx = tangX + newInward * nx;
-                my = tangY + newInward * ny;
+                const resistance = Math.min(1, 0.8 + (1 - r) * 0.4);
+                mx -= inward * resistance * nx;
+                my -= inward * resistance * ny;
             }
         }
 
@@ -70,15 +72,12 @@
 
         if (r < 1 && dist > 0) {
             const angle = Math.atan2(cursorY - cy, cursorX - cx);
-            const pushAmount = (1-r) * 0.5 * moonR;
-            gsap.set(svg, { x: -Math.cos(angle) * pushAmount, y: -Math.sin(angle) * pushAmount });
-            const depth = (1 - r) * DENT_DEPTH * WHITE_R;
-            whitePath = buildDentPath(WHITE_CX, WHITE_CY, WHITE_R, angle, depth);
-            blackPath = buildDentPath(BLACK_CX, BLACK_CY, BLACK_R, angle, depth);
+            const push = (1 - r) * 0.5 * moonR;
+            svg.style.transform = `translate(${-Math.cos(angle) * push}px, ${-Math.sin(angle) * push}px)`;
+            setDent(angle, (1 - r) * DENT_DEPTH * WHITE_R);
         } else {
-            gsap.set(svg, { x: 0, y: 0 });
-            whitePath = buildDentPath(WHITE_CX, WHITE_CY, WHITE_R, 0, 0);
-            blackPath = buildDentPath(BLACK_CX, BLACK_CY, BLACK_R, 0, 0);
+            svg.style.transform = 'translate(0px, 0px)';
+            setDent(0, 0);
         }
     }
 
@@ -94,10 +93,7 @@
         render();
     }
 
-    onMount(async () => {
-        ({ default: gsap } = await import('gsap'));
-        cursorX = window.innerWidth / 2;
-        cursorY = window.innerHeight / 2;
+    onMount(() => {
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('click', onClick);
         document.addEventListener('pointerlockchange', onLockChange);

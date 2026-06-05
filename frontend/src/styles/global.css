@@ -1,5 +1,12 @@
+@font-face {
+  font-family: 'Joan';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Joan-Regular.woff2') format('woff2');
+}
+
 :root {
-  --font-display: 'Joan', serif;
   --brown: #261F19;
   --black: #000000;
   --white: #EFEDEA;

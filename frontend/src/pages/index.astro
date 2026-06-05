@@ -4,41 +4,40 @@ import Moon from '../components/Moon.svelte'
 ---
 <Layout title="Home">
   <main>
-    <div class="moon">
-      <Moon client:load></Moon>
-    </div>
-    <div class="title">
-      <a>albertahnfelt.com</a>
+    <div class="stack">
+      <div class="moon">
+        <Moon client:load></Moon>
+      </div>
+      <div class="title">
+        <a>albertahnfelt.com</a>
+      </div>
     </div>
   </main>
 </Layout>
 
 <style>
   main {
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    min-height: 100vh;
   }
 
-main {
-  height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+  .stack {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+  }
 
-.moon  {
-  width: 12rem;
-  height: 12rem;
-}
+  .moon {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    margin-left: -6rem;
+    margin-bottom: 0.5rem;
+    width: 12rem;
+    height: 12rem;
+  }
 
-.title {
-  position: fixed;
-  bottom: 1.5rem;
-  right: 1.5rem;
-  font-size: 2rem;
-  text-shadow: 0.12rem 0px 0px var(--black);
-}
-
+  .title {
+    font-size: 2rem;
+    text-shadow: 0.12rem 0px 0px var(--black);
+  }
 </style>
