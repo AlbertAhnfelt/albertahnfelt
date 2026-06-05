@@ -42,9 +42,13 @@
         cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + my));
         render();
 
-        const angle = Math.atan2(cursorY - cy, cursorX - cx);
-
-        // TODO: drive animations with angle (radians, −π..π) and r (0 = center, 1 = edge)
+        if (r < 1 && dist > 0) {
+            const angle = Math.atan2(cursorY - cy, cursorX - cx);
+            const pushAmount = (1-r) * 0.5 * moonR;
+            gsap.set(svg, { x: -Math.cos(angle) * pushAmount, y: -Math.sin(angle) * pushAmount });
+        } else {
+            gsap.set(svg, { x: 0, y: 0 });
+        }
     }
 
     function onClick(e) {
