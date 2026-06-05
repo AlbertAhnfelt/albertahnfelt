@@ -1,0 +1,187 @@
+---
+import { Picture } from 'astro:assets'
+import Layout from '../layouts/Layout.astro'
+import Moon from '../components/Moon.svelte'
+import { clickyMode } from '../config'
+import tvBuilding from '../assets/images/tv-building.jpg'
+import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
+---
+<Layout title="Inlägg">
+  <main>
+
+  <nav class="menu">
+        <a>Hur hamnade jag här</a>
+        <a>Hur hamnade jag här 2</a>
+        <a>Hur hamnade jag här 3</a>
+        <a>Hur hamnade jag här 4</a>
+    </nav>
+
+    <div class="content">
+      <div class="left">
+        <a class="back" href="/">
+          <img src="/arrow.svg" alt="Till startsidan" />
+        </a>
+
+        <div class="photos">
+          <Picture
+            class="photo photo-top"
+            src={tvBuilding}
+            formats={['avif', 'webp']}
+            widths={[400, 800]}
+            sizes="(max-width: 600px) 60vw, 28vw"
+            alt=""
+            loading="eager"
+          />
+
+          <Picture
+            class="photo photo-bottom"
+            src={outsideBookshelf}
+            formats={['avif', 'webp']}
+            widths={[500, 1000]}
+            sizes="(max-width: 600px) 75vw, 34vw"
+            alt=""
+            loading="eager"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="moon">
+        <Moon clicky={clickyMode} client:load></Moon>
+      </div>
+      <div class="title">
+        <a href="/">albertahnfelt.com</a>
+      </div>
+    </div>
+  </main>
+</Layout>
+
+<style>
+  main {
+    min-height: 100vh;
+  }
+
+  /* The left block (images + arrow) and the text live in one flex row, so the
+     arrow and text are positioned RELATIVE to the actual image edges rather
+     than at fixed viewport coordinates. This keeps them locked together at any
+     zoom level. The right padding reserves space for the moon/title corner. */
+  .content {
+    display: flex;
+    align-items: flex-start;
+    gap: 2.5rem;
+    padding: 3vh 16rem 0 0;
+  }
+
+  .left {
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  /* Pinned to the right edge of the image column => always lines up with the
+     right edge of the widest (bottom) image, whatever its rendered size is. */
+  .back {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  .back img {
+    display: block;
+    width: 2rem;
+    height: auto;
+    transform: rotate(180deg);
+  }
+
+  .photos {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2vh;
+  }
+
+  .photo {
+    display: block;
+    width: auto;
+    height: auto;
+  }
+
+  .photo-top {
+    max-width: 22rem;
+    max-height: 36vh;
+  }
+
+  .photo-bottom {
+    max-width: 28rem;
+    max-height: 49vh;
+  }
+
+  .menu {
+    position: fixed;
+    top: 5rem;
+    right: 30%;
+    display: flex;
+    flex-direction: column;
+    text-align: right;
+    font-size: 1.6rem;
+    line-height: 1.7;
+  }
+
+  .stack {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+  }
+
+  .moon {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    margin-left: -6rem;
+    margin-bottom: 0.5rem;
+    width: 12rem;
+    height: 12rem;
+  }
+
+  .title {
+    font-size: 2rem;
+    text-shadow: 0.12rem 0px 0px var(--black);
+  }
+
+  @media (max-width: 768px) {
+    .content {
+      flex-direction: column;
+      gap: 1.5rem;
+      padding: 2rem 1.5rem 12rem;
+    }
+
+    .photo-top {
+      max-width: 45vw;
+      max-height: 30vh;
+    }
+
+    .photo-bottom {
+      max-width: 52vw;
+      max-height: 35vh;
+    }
+
+    .reader-text {
+      font-size: 1rem;
+    }
+
+    .stack {
+      bottom: 1rem;
+      right: 1rem;
+    }
+
+    .moon {
+      width: 8rem;
+      height: 8rem;
+      margin-left: -4rem;
+    }
+
+    .title {
+      font-size: 1.4rem;
+    }
+  }
+</style>

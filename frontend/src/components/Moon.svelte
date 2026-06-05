@@ -1,6 +1,8 @@
 <script>
     import { onMount } from 'svelte';
 
+    export let clicky = false;
+
     let svg;
     let cursorEl;
     let cursorX = 0, cursorY = 0;
@@ -82,10 +84,22 @@
     }
 
     function onClick(e) {
-        if (locked) return;
-        cursorX = e.clientX;
-        cursorY = e.clientY;
-        document.body.requestPointerLock();
+        e.preventDefault();
+        if (!locked) {
+            cursorX = e.clientX;
+            cursorY = e.clientY;
+            document.body.requestPointerLock();
+            return;
+        }
+        const target = document.elementFromPoint(cursorX, cursorY);
+        const clickable = target?.closest('a, button');
+        if (!clickable) return;
+        const href = clickable.getAttribute('href');
+        if (href) {
+            window.location.href = href;
+        } else {
+            clickable.click();
+        }
     }
 
     function onLockChange() {
@@ -94,6 +108,7 @@
     }
 
     onMount(() => {
+        if (!clicky) return;
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('click', onClick);
         document.addEventListener('pointerlockchange', onLockChange);
@@ -105,7 +120,9 @@
     });
 </script>
 
-<img bind:this={cursorEl} class="cursor" src="/mouse.svg" alt="" />
+{#if clicky}
+  <img bind:this={cursorEl} class="cursor" src="/mouse.svg" alt="" />
+{/if}
 
 <svg bind:this={svg} role="img" width="248" height="235" viewBox="0 0 248 235" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d={blackPath} fill="black"/>

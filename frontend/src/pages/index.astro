@@ -2,14 +2,16 @@
 import { Picture } from 'astro:assets'
 import Layout from '../layouts/Layout.astro'
 import Moon from '../components/Moon.svelte'
+import { clickyMode } from '../config'
 import tvBuilding from '../assets/images/tv-building.jpg'
 import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
 ---
 <Layout title="Home">
   <main>
     <nav class="menu">
-      <a>om</a>
-      <a>texter</a>
+      <a href="/about">om</a>
+      <a href="/posts">inlägg</a>
+      <a href="/inspiration">inspiration</a>
       <a>english</a>
     </nav>
 
@@ -37,7 +39,7 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
 
     <div class="stack">
       <div class="moon">
-        <Moon client:load></Moon>
+        <Moon clicky={clickyMode} client:load></Moon>
       </div>
       <div class="title">
         <a>albertahnfelt.com</a>
@@ -110,5 +112,43 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
   .title {
     font-size: 2rem;
     text-shadow: 0.12rem 0px 0px var(--black);
+  }
+
+  @media (max-width: 768px) {
+    .photos {
+      top: 2rem;
+      gap: 1.5rem;
+    }
+
+    .photo-top {
+      max-width: 45vw;
+      max-height: 30vh;
+    }
+
+    .photo-bottom {
+      max-width: 52vw;
+      max-height: 35vh;
+    }
+
+    .menu {
+      top: 1.5rem;
+      right: 1.5rem;
+      font-size: 1.3rem;
+    }
+
+    .stack {
+      bottom: 1rem;
+      right: 1rem;
+    }
+
+    .moon {
+      width: 8rem;
+      height: 8rem;
+      margin-left: -4rem;
+    }
+
+    .title {
+      font-size: 1.4rem;
+    }
   }
 </style>
