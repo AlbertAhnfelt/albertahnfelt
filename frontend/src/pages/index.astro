@@ -1,9 +1,40 @@
 ---
+import { Picture } from 'astro:assets'
 import Layout from '../layouts/Layout.astro'
 import Moon from '../components/Moon.svelte'
+import tvBuilding from '../assets/images/tv-building.jpg'
+import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
 ---
 <Layout title="Home">
   <main>
+    <nav class="menu">
+      <a>om</a>
+      <a>texter</a>
+      <a>english</a>
+    </nav>
+
+    <div class="photos">
+      <Picture
+        class="photo photo-top"
+        src={tvBuilding}
+        formats={['avif', 'webp']}
+        widths={[400, 800]}
+        sizes="(max-width: 600px) 60vw, 28vw"
+        alt=""
+        loading="eager"
+      />
+
+      <Picture
+        class="photo photo-bottom"
+        src={outsideBookshelf}
+        formats={['avif', 'webp']}
+        widths={[500, 1000]}
+        sizes="(max-width: 600px) 75vw, 34vw"
+        alt=""
+        loading="eager"
+      />
+    </div>
+
     <div class="stack">
       <div class="moon">
         <Moon client:load></Moon>
@@ -18,6 +49,46 @@ import Moon from '../components/Moon.svelte'
 <style>
   main {
     min-height: 100vh;
+  }
+
+  .menu {
+    position: fixed;
+    top: 5rem;
+    right: 30%;
+    display: flex;
+    flex-direction: column;
+    text-align: right;
+    font-size: 1.6rem;
+    line-height: 1.7;
+  }
+
+  .menu a {
+    cursor: pointer;
+  }
+
+  .photos {
+    position: fixed;
+    top: 3vh;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2vh;
+  }
+
+  .photo {
+    display: block;
+    width: auto;
+    height: auto;
+  }
+
+  .photo-top {
+    max-width: 22rem;
+    max-height: 36vh;
+  }
+
+  .photo-bottom {
+    max-width: 28rem;
+    max-height: 49vh;
   }
 
   .stack {
