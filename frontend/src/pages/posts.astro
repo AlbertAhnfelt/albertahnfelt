@@ -52,7 +52,7 @@ const posts = (await getCollection('posts')).sort(
 
     <div class="stack">
       <div class="moon">
-        <Moon clicky={clickyMode} client:load></Moon>
+        <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
       </div>
       <div class="title">
         <a href="/">albertahnfelt.com</a>

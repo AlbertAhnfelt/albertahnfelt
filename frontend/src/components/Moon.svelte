@@ -1,5 +1,6 @@
 <script>
     import { onMount } from 'svelte';
+    import { navigate } from 'astro:transitions/client';
 
     export let clicky = false;
 
@@ -96,7 +97,7 @@
         if (!clickable) return;
         const href = clickable.getAttribute('href');
         if (href) {
-            window.location.href = href;
+            navigate(href);
         } else {
             clickable.click();
         }

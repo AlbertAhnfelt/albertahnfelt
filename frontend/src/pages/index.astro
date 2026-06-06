@@ -12,7 +12,6 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
       <a href="/about">om</a>
       <a href="/posts">inlägg</a>
       <a href="/inspiration">inspiration</a>
-      <a>english</a>
     </nav>
 
     <div class="photos">
@@ -39,7 +38,7 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
 
     <div class="stack">
       <div class="moon">
-        <Moon clicky={clickyMode} client:load></Moon>
+        <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
       </div>
       <div class="title">
         <a>albertahnfelt.com</a>

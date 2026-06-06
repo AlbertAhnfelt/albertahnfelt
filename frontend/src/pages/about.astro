@@ -46,7 +46,7 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
 
     <div class="stack">
       <div class="moon">
-        <Moon clicky={clickyMode} client:load></Moon>
+        <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
       </div>
       <div class="title">
         <a href="/">albertahnfelt.com</a>
@@ -169,7 +169,7 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
     }
 
     .reader-text {
-      font-size: 1rem;
+      font-size: 1.05rem;
     }
 
     .stack {
