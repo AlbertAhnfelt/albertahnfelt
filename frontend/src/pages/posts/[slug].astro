@@ -1,8 +1,8 @@
 ---
 import { getCollection, render } from 'astro:content'
 import Layout from '../../layouts/Layout.astro'
-import Moon from '../../components/Moon.svelte'
-import { clickyMode } from '../../config'
+import BackArrow from '../../components/BackArrow.astro'
+import MoonCorner from '../../components/MoonCorner.astro'
 
 export async function getStaticPaths() {
   const posts = await getCollection('posts')
@@ -18,11 +18,9 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
   day: 'numeric',
 })
 ---
-<Layout title={post.data.title}>
+<Layout title={post.data.title} description={post.data.description}>
   <main>
-    <a class="back" href="/posts">
-      <img src="/arrow.svg" alt="Till inlägg" />
-    </a>
+    <BackArrow href="/posts" label="Till inlägg" variant="corner" />
 
     <div class="content">
       <article class="reader-text">
@@ -32,14 +30,7 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
       </article>
     </div>
 
-    <div class="stack">
-      <div class="moon">
-        <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
-      </div>
-      <div class="title">
-        <a href="/">albertahnfelt.com</a>
-      </div>
-    </div>
+    <MoonCorner variant="top" />
   </main>
 </Layout>
 
@@ -54,22 +45,9 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
     padding: 3vh 1.5rem 0;
   }
 
-  .back {
-    position: absolute;
-    top: 1.5rem;
-    left: 1.5rem;
-  }
-
-  .back img {
-    display: block;
-    width: 2rem;
-    height: auto;
-    transform: rotate(180deg);
-  }
-
   .reader-text {
     width: 100%;
-    max-width: 36rem; 
+    max-width: 36rem;
     margin-top: 6rem;
     margin-bottom: 8rem;
     font-size: 1.05rem;
@@ -136,27 +114,6 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
     margin: 1.5rem 0;
   }
 
-  .stack {
-    position: absolute;
-    top: 1.5rem;
-    right: 1.5rem;
-  }
-
-  .moon {
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    margin-left: -4rem;
-    margin-top: 0.5rem;
-    width: 8rem;
-    height: 8rem;
-  }
-
-  .title {
-    font-size: 1.5rem;
-    text-shadow: 0.12rem 0px 0px var(--black);
-  }
-
   @media (max-width: 768px) {
     .content {
       padding: 2rem 1.5rem 12rem;
@@ -165,21 +122,6 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
     .reader-text {
       margin-top: 4rem;
       font-size: 1rem;
-    }
-
-    .stack {
-      top: 1rem;
-      right: 1rem;
-    }
-
-    .moon {
-      width: 8rem;
-      height: 8rem;
-      margin-left: -4rem;
-    }
-
-    .title {
-      font-size: 1.4rem;
     }
   }
 </style>

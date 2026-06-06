@@ -2,14 +2,30 @@
 import '../styles/global.css'
 import { ClientRouter } from 'astro:transitions'
 
-const { title } = Astro.props
+const SITE_NAME = 'Albert Ahnfelt'
+const DEFAULT_DESCRIPTION = 'Albert Ahnfelts sajt.'
+
+const { title, description } = Astro.props
+const pageTitle = title ? `${title} — ${SITE_NAME}` : SITE_NAME
+const pageDescription = description ?? DEFAULT_DESCRIPTION
+const canonicalURL = new URL(Astro.url.pathname, Astro.site)
 ---
-<html lang="en">
+<html lang="sv">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>{title}</title>
+    <link rel="canonical" href={canonicalURL} />
+    <title>{pageTitle}</title>
+    <meta name="description" content={pageDescription} />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={pageDescription} />
+    <meta property="og:url" content={canonicalURL} />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={pageTitle} />
+    <meta name="twitter:description" content={pageDescription} />
     <link rel="preload" as="font" type="font/woff2" href="/fonts/Joan-Regular.woff2" crossorigin>
     <ClientRouter />
   </head>

@@ -1,0 +1,83 @@
+---
+import Moon from './Moon.svelte'
+import { clickyMode } from '../config'
+
+const { variant = 'bottom' } = Astro.props
+---
+<div class:list={['stack', variant]}>
+  <div class="moon">
+    <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
+  </div>
+  <div class="title">
+    <a href="/">albertahnfelt.com</a>
+  </div>
+</div>
+
+<style>
+  .stack.bottom {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+  }
+
+  .stack.top {
+    position: absolute;
+    top: 1.5rem;
+    right: 1.5rem;
+  }
+
+  .moon {
+    position: absolute;
+    left: 50%;
+  }
+
+  .stack.bottom .moon {
+    bottom: 100%;
+    margin-left: -6rem;
+    margin-bottom: 0.5rem;
+    width: 12rem;
+    height: 12rem;
+  }
+
+  .stack.top .moon {
+    top: 100%;
+    margin-left: -4rem;
+    margin-top: 0.5rem;
+    width: 8rem;
+    height: 8rem;
+  }
+
+  .title {
+    text-shadow: 0.12rem 0px 0px var(--black);
+  }
+
+  .stack.bottom .title {
+    font-size: 2rem;
+  }
+
+  .stack.top .title {
+    font-size: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .stack.bottom {
+      bottom: 1rem;
+      right: 1rem;
+    }
+
+    .stack.top {
+      top: 1rem;
+      right: 1rem;
+    }
+
+    .moon {
+      width: 8rem;
+      height: 8rem;
+      margin-left: -4rem;
+    }
+
+    .title {
+      font-size: 1.4rem;
+    }
+  }
+</style>

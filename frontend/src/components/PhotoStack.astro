@@ -1,0 +1,76 @@
+---
+import { Picture } from 'astro:assets'
+import tvBuilding from '../assets/images/tv-building.jpg'
+import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
+
+const { variant = 'column' } = Astro.props
+---
+<div class:list={['photos', variant]}>
+  <Picture
+    class="photo photo-top"
+    src={tvBuilding}
+    formats={['avif', 'webp']}
+    widths={[400, 800]}
+    sizes="(max-width: 600px) 60vw, 28vw"
+    alt=""
+    loading="eager"
+  />
+
+  <Picture
+    class="photo photo-bottom"
+    src={outsideBookshelf}
+    formats={['avif', 'webp']}
+    widths={[500, 1000]}
+    sizes="(max-width: 600px) 75vw, 34vw"
+    alt=""
+    loading="eager"
+  />
+</div>
+
+<style>
+  .photos {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2vh;
+  }
+
+  .photos.home {
+    position: absolute;
+    top: 3vh;
+    left: 0;
+  }
+
+  .photo {
+    display: block;
+    width: auto;
+    height: auto;
+  }
+
+  .photo-top {
+    max-width: 22rem;
+    max-height: 36vh;
+  }
+
+  .photo-bottom {
+    max-width: 28rem;
+    max-height: 49vh;
+  }
+
+  @media (max-width: 768px) {
+    .photos.home {
+      top: 2rem;
+      gap: 1.5rem;
+    }
+
+    .photo-top {
+      max-width: 45vw;
+      max-height: 30vh;
+    }
+
+    .photo-bottom {
+      max-width: 52vw;
+      max-height: 35vh;
+    }
+  }
+</style>

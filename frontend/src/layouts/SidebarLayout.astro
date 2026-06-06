@@ -1,0 +1,47 @@
+---
+import Layout from './Layout.astro'
+import PhotoStack from '../components/PhotoStack.astro'
+import BackArrow from '../components/BackArrow.astro'
+import MoonCorner from '../components/MoonCorner.astro'
+
+const { title, description, backHref = '/', backLabel = 'Till startsidan' } = Astro.props
+---
+<Layout title={title} description={description}>
+  <main>
+    <div class="content">
+      <div class="left">
+        <BackArrow href={backHref} label={backLabel} />
+        <PhotoStack />
+      </div>
+      <slot />
+    </div>
+
+    <MoonCorner />
+  </main>
+</Layout>
+
+<style>
+  main {
+    min-height: 100vh;
+  }
+
+  .content {
+    display: grid;
+    grid-template-columns: auto 1fr 16rem;
+    align-items: start;
+    gap: 2.5rem;
+    padding: 3vh 1.5rem 0 0;
+  }
+
+  .left {
+    position: relative;
+  }
+
+  @media (max-width: 768px) {
+    .content {
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      padding: 2rem 1.5rem 12rem;
+    }
+  }
+</style>

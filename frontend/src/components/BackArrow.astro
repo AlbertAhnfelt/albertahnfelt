@@ -1,0 +1,32 @@
+---
+const { href, label, variant = 'sidebar' } = Astro.props
+---
+<a class:list={['back', variant]} href={href}>
+  <img src="/arrow.svg" alt={label} />
+</a>
+
+<style>
+  .back.sidebar {
+    position: absolute;
+    top: 0;
+    right: 0;
+  }
+
+  .back.corner {
+    position: absolute;
+    top: 1.5rem;
+    left: 1.5rem;
+  }
+
+  .back img {
+    display: block;
+    width: 2rem;
+    height: auto;
+    transform: rotate(180deg);
+    transition: transform 0.15s ease;
+  }
+
+  .back:hover img {
+    transform: rotate(180deg) scale(var(--hover-scale));
+  }
+</style>

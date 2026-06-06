@@ -1,123 +1,28 @@
 ---
-import { Picture } from 'astro:assets'
-import Layout from '../layouts/Layout.astro'
-import Moon from '../components/Moon.svelte'
-import { clickyMode } from '../config'
-import tvBuilding from '../assets/images/tv-building.jpg'
-import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
+import SidebarLayout from '../layouts/SidebarLayout.astro'
+import { socials } from '../data/socials'
 ---
-<Layout title="Om">
-  <main>
-    <div class="content">
-      <div class="left">
-        <a class="back" href="/">
-          <img src="/arrow.svg" alt="Till startsidan" />
+<SidebarLayout title="Om">
+  <article class="reader-text">
+    <p>Välkommen till albertahnfelt.com!</p>
+    <p>Jag studerar vanligtvis till civilingenjör i industriell ekonomi vid Lunds Tekniska Högskola, och är intresserad av lite allt möjligt.</p>
+    <p>Det här är min digitala lekstuga. Ta en titt runt!</p>
+
+    <nav class="socials">
+      {socials.map((social) => (
+        <a href={social.url} target="_blank" rel="noopener noreferrer" aria-label={social.name}>
+          <img src={social.icon} alt={social.name} />
         </a>
-
-        <div class="photos">
-          <Picture
-            class="photo photo-top"
-            src={tvBuilding}
-            formats={['avif', 'webp']}
-            widths={[400, 800]}
-            sizes="(max-width: 600px) 60vw, 28vw"
-            alt=""
-            loading="eager"
-          />
-
-          <Picture
-            class="photo photo-bottom"
-            src={outsideBookshelf}
-            formats={['avif', 'webp']}
-            widths={[500, 1000]}
-            sizes="(max-width: 600px) 75vw, 34vw"
-            alt=""
-            loading="eager"
-          />
-        </div>
-      </div>
-
-      <article class="reader-text">
-        <p>Välkommen till albertahnfelt.com!</p>
-        <p>Jag studerar vanligtvis till civilingenjör i industriell ekonomi vid Lunds Tekniska Högskola, och är intresserad av lite allt möjligt.</p>
-        <p>Det här är min digitala lekstuga. Ta en titt runt!</p>
-      </article>
-    </div>
-
-    <div class="stack">
-      <div class="moon">
-        <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
-      </div>
-      <div class="title">
-        <a href="/">albertahnfelt.com</a>
-      </div>
-    </div>
-  </main>
-</Layout>
+      ))}
+    </nav>
+  </article>
+</SidebarLayout>
 
 <style>
-  main {
-    min-height: 100vh;
-  }
-
-  /* The left block (images + arrow) and the text live in one flex row, so the
-     arrow and text are positioned RELATIVE to the actual image edges rather
-     than at fixed viewport coordinates. This keeps them locked together at any
-     zoom level. The right padding reserves space for the moon/title corner. */
-  .content {
-    display: flex;
-    align-items: flex-start;
-    gap: 2.5rem;
-    padding: 3vh 16rem 0 0;
-  }
-
-  .left {
-    position: relative;
-    flex: 0 0 auto;
-  }
-
-  /* Pinned to the right edge of the image column => always lines up with the
-     right edge of the widest (bottom) image, whatever its rendered size is. */
-  .back {
-    position: absolute;
-    top: 0;
-    right: 0;
-  }
-
-  .back img {
-    display: block;
-    width: 2rem;
-    height: auto;
-    transform: rotate(180deg);
-  }
-
-  .photos {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2vh;
-  }
-
-  .photo {
-    display: block;
-    width: auto;
-    height: auto;
-  }
-
-  .photo-top {
-    max-width: 22rem;
-    max-height: 36vh;
-  }
-
-  .photo-bottom {
-    max-width: 28rem;
-    max-height: 49vh;
-  }
-
   .reader-text {
-    flex: 1;
-    min-width: 0;
-    margin-top: 4rem;
+    max-width: 28rem;
+    margin-top: 6rem;
+    justify-self: center;
     font-size: 1.05rem;
     line-height: 1.6;
   }
@@ -130,61 +35,29 @@ import outsideBookshelf from '../assets/images/outside-bookshelf.jpg'
     margin-bottom: 0;
   }
 
-  .stack {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
+  .socials {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 4rem;
   }
 
-  .moon {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    margin-left: -6rem;
-    margin-bottom: 0.5rem;
-    width: 12rem;
-    height: 12rem;
+  .socials a {
+    display: block;
+    line-height: 0;
   }
 
-  .title {
-    font-size: 2rem;
-    text-shadow: 0.12rem 0px 0px var(--black);
+  .socials img {
+    width: 1.9rem;
+    height: 1.9rem;
+    object-fit: contain;
+    filter: invert(1) drop-shadow(0.12rem 0 0 var(--black));
+    transition: transform 0.15s ease, filter 0.15s ease;
   }
 
-  @media (max-width: 768px) {
-    .content {
-      flex-direction: column;
-      gap: 1.5rem;
-      padding: 2rem 1.5rem 12rem;
-    }
-
-    .photo-top {
-      max-width: 45vw;
-      max-height: 30vh;
-    }
-
-    .photo-bottom {
-      max-width: 52vw;
-      max-height: 35vh;
-    }
-
-    .reader-text {
-      font-size: 1.05rem;
-    }
-
-    .stack {
-      bottom: 1rem;
-      right: 1rem;
-    }
-
-    .moon {
-      width: 8rem;
-      height: 8rem;
-      margin-left: -4rem;
-    }
-
-    .title {
-      font-size: 1.4rem;
-    }
+  .socials a:hover img {
+    filter: invert(1) drop-shadow(0 0 0 transparent);
+    transform: scale(var(--hover-scale));
   }
 </style>
