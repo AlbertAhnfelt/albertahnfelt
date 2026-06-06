@@ -1,11 +1,8 @@
 ---
-import { Picture } from 'astro:assets'
 import { getCollection, render } from 'astro:content'
 import Layout from '../../layouts/Layout.astro'
 import Moon from '../../components/Moon.svelte'
 import { clickyMode } from '../../config'
-import tvBuilding from '../../assets/images/tv-building.jpg'
-import outsideBookshelf from '../../assets/images/outside-bookshelf.jpg'
 
 export async function getStaticPaths() {
   const posts = await getCollection('posts')
@@ -14,40 +11,23 @@ export async function getStaticPaths() {
 
 const { post } = Astro.props
 const { Content } = await render(post)
+
+const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+})
 ---
 <Layout title={post.data.title}>
   <main>
+    <a class="back" href="/posts">
+      <img src="/arrow.svg" alt="Till inlägg" />
+    </a>
+
     <div class="content">
-      <div class="left">
-        <a class="back" href="/posts">
-          <img src="/arrow.svg" alt="Till inlägg" />
-        </a>
-
-        <div class="photos">
-          <Picture
-            class="photo photo-top"
-            src={tvBuilding}
-            formats={['avif', 'webp']}
-            widths={[400, 800]}
-            sizes="(max-width: 600px) 60vw, 28vw"
-            alt=""
-            loading="eager"
-          />
-
-          <Picture
-            class="photo photo-bottom"
-            src={outsideBookshelf}
-            formats={['avif', 'webp']}
-            widths={[500, 1000]}
-            sizes="(max-width: 600px) 75vw, 34vw"
-            alt=""
-            loading="eager"
-          />
-        </div>
-      </div>
-
       <article class="reader-text">
         <h1>{post.data.title}</h1>
+        <time class="date" datetime={post.data.date.toISOString()}>{formattedDate}</time>
         <Content />
       </article>
     </div>
@@ -70,20 +50,14 @@ const { Content } = await render(post)
 
   .content {
     display: flex;
-    align-items: flex-start;
-    gap: 2.5rem;
-    padding: 3vh 16rem 0 0;
-  }
-
-  .left {
-    position: relative;
-    flex: 0 0 auto;
+    justify-content: center;
+    padding: 3vh 1.5rem 0;
   }
 
   .back {
     position: absolute;
-    top: 0;
-    right: 0;
+    top: 1.5rem;
+    left: 1.5rem;
   }
 
   .back img {
@@ -93,44 +67,27 @@ const { Content } = await render(post)
     transform: rotate(180deg);
   }
 
-  .photos {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2vh;
-  }
-
-  .photo {
-    display: block;
-    width: auto;
-    height: auto;
-  }
-
-  .photo-top {
-    max-width: 22rem;
-    max-height: 36vh;
-  }
-
-  .photo-bottom {
-    max-width: 28rem;
-    max-height: 49vh;
-  }
-
   .reader-text {
-    flex: 1;
-    min-width: 0;
+    width: 100%;
+    max-width: 36rem; 
     margin-top: 6rem;
-    margin-right: 3rem;
     margin-bottom: 8rem;
     font-size: 1.05rem;
     line-height: 1.6;
-
   }
 
   .reader-text :global(h1) {
-    font-size: 2.2rem;
+    font-size: 2rem;
     line-height: 1.2;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .date {
+    display: block;
+    margin-bottom: 2rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    opacity: 0.6;
   }
 
   .reader-text :global(h2) {
@@ -180,50 +137,38 @@ const { Content } = await render(post)
   }
 
   .stack {
-    position: fixed;
-    bottom: 1.5rem;
+    position: absolute;
+    top: 1.5rem;
     right: 1.5rem;
   }
 
   .moon {
     position: absolute;
-    bottom: 100%;
+    top: 100%;
     left: 50%;
-    margin-left: -6rem;
-    margin-bottom: 0.5rem;
-    width: 12rem;
-    height: 12rem;
+    margin-left: -4rem;
+    margin-top: 0.5rem;
+    width: 8rem;
+    height: 8rem;
   }
 
   .title {
-    font-size: 2rem;
+    font-size: 1.5rem;
     text-shadow: 0.12rem 0px 0px var(--black);
   }
 
   @media (max-width: 768px) {
     .content {
-      flex-direction: column;
-      gap: 1.5rem;
       padding: 2rem 1.5rem 12rem;
     }
 
-    .photo-top {
-      max-width: 45vw;
-      max-height: 30vh;
-    }
-
-    .photo-bottom {
-      max-width: 52vw;
-      max-height: 35vh;
-    }
-
     .reader-text {
-      margin-top: 0;
+      margin-top: 4rem;
       font-size: 1rem;
     }
 
     .stack {
-      bottom: 1rem;
+      top: 1rem;
       right: 1rem;
     }
 
