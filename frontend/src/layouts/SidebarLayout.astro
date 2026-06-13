@@ -27,21 +27,21 @@ const { title, description, backHref = '/', backLabel = 'Till startsidan' } = As
 
   .content {
     display: grid;
-    grid-template-columns: auto 1fr 16rem;
+    grid-template-columns: 1fr;
     align-items: start;
-    gap: 2.5rem;
-    padding: 3vh 1.5rem 0 0;
+    gap: 1.5rem;
+    padding: 1.5rem 1.5rem 0;
   }
 
   .left {
     position: relative;
   }
 
-  @media (max-width: 768px) {
+  @media (min-width: 768px) {
     .content {
-      grid-template-columns: 1fr;
-      gap: 1.5rem;
-      padding: 2rem 1.5rem 12rem;
+      grid-template-columns: auto 1fr 16rem;
+      gap: 2.5rem;
+      padding: 3vh 1.5rem 0 0;
     }
   }
 </style>

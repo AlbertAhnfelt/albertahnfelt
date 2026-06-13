@@ -5,13 +5,13 @@ import MoonCorner from '../components/MoonCorner.astro'
 ---
 <Layout>
   <main>
+    <PhotoStack variant="home" />
+
     <nav class="menu">
       <a href="/about">om</a>
       <a href="/posts">inlägg</a>
       <a href="/inspiration">inspiration</a>
     </nav>
-
-    <PhotoStack variant="home" />
 
     <MoonCorner />
   </main>
@@ -20,5 +20,25 @@ import MoonCorner from '../components/MoonCorner.astro'
 <style>
   main {
     min-height: 100vh;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: start;
+    gap: 1rem;
+    padding: 1.5rem;
+  }
+
+  main :global(.stack.bottom) {
+    grid-column: 1 / -1;
+  }
+
+  @media (min-width: 768px) {
+    main {
+      display: block;
+      padding: 0;
+    }
+
+    main :global(.stack.bottom) {
+      grid-column: auto;
+    }
   }
 </style>

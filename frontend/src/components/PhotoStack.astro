@@ -32,13 +32,19 @@ const { variant = 'column' } = Astro.props
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 2vh;
+    gap: 1.5rem;
   }
 
-  .photos.home {
-    position: absolute;
-    top: 3vh;
-    left: 0;
+  @media (min-width: 768px) {
+    .photos {
+      gap: 2vh;
+    }
+
+    .photos.home {
+      position: absolute;
+      top: 3vh;
+      left: 0;
+    }
   }
 
   .photo {
@@ -48,29 +54,24 @@ const { variant = 'column' } = Astro.props
   }
 
   .photo-top {
-    max-width: 22rem;
-    max-height: 36vh;
+    max-width: 45vw;
+    max-height: 30vh;
   }
 
   .photo-bottom {
-    max-width: 28rem;
-    max-height: 49vh;
+    max-width: 52vw;
+    max-height: 35vh;
   }
 
-  @media (max-width: 768px) {
-    .photos.home {
-      top: 2rem;
-      gap: 1.5rem;
-    }
-
+  @media (min-width: 768px) {
     .photo-top {
-      max-width: 45vw;
-      max-height: 30vh;
+      max-width: 28rem;
+      max-height: 44vh;
     }
 
     .photo-bottom {
-      max-width: 52vw;
-      max-height: 35vh;
+      max-width: 36rem;
+      max-height: 58vh;
     }
   }
 </style>

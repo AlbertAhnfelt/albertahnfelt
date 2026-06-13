@@ -24,15 +24,21 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .menu {
-  position: fixed;
-  top: 5rem;
-  right: 30%;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   text-align: right;
-  font-size: 1.6rem;
+  font-size: 1.3rem;
   line-height: 1.7;
+}
+
+@media (min-width: 768px) {
+  .menu {
+    position: fixed;
+    top: 5rem;
+    right: 30%;
+    font-size: 1.6rem;
+  }
 }
 
 .menu a,
@@ -48,12 +54,4 @@ h1, h2, h3, h4, h5, h6 {
 .title a:hover {
   text-shadow: 0 0 0 transparent;
   transform: translateX(0.4rem);
-}
-
-@media (max-width: 768px) {
-  .menu {
-    top: 1.5rem;
-    right: 1.5rem;
-    font-size: 1.3rem;
-  }
 }

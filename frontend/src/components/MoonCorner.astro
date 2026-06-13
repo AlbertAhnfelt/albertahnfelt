@@ -15,15 +15,16 @@ const { variant = 'bottom' } = Astro.props
 
 <style>
   .stack.bottom {
-    position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 3rem 0 2rem;
   }
 
   .stack.top {
     position: absolute;
-    top: 1.5rem;
-    right: 1.5rem;
+    top: 1rem;
+    right: 1rem;
   }
 
   .moon {
@@ -32,11 +33,11 @@ const { variant = 'bottom' } = Astro.props
   }
 
   .stack.bottom .moon {
-    bottom: 100%;
-    margin-left: -6rem;
+    position: relative;
+    left: auto;
+    width: 8rem;
+    height: 8rem;
     margin-bottom: 0.5rem;
-    width: 12rem;
-    height: 12rem;
   }
 
   .stack.top .moon {
@@ -48,36 +49,40 @@ const { variant = 'bottom' } = Astro.props
   }
 
   .title {
+    font-size: 1.4rem;
     text-shadow: 0.12rem 0px 0px var(--black);
   }
 
-  .stack.bottom .title {
-    font-size: 2rem;
-  }
-
-  .stack.top .title {
-    font-size: 1.5rem;
-  }
-
-  @media (max-width: 768px) {
+  @media (min-width: 768px) {
     .stack.bottom {
-      bottom: 1rem;
-      right: 1rem;
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      display: block;
+      padding: 0;
     }
 
     .stack.top {
-      top: 1rem;
-      right: 1rem;
+      top: 1.5rem;
+      right: 1.5rem;
     }
 
-    .moon {
-      width: 8rem;
-      height: 8rem;
-      margin-left: -4rem;
+    .stack.bottom .moon {
+      position: absolute;
+      left: 50%;
+      bottom: 100%;
+      width: 12rem;
+      height: 12rem;
+      margin-left: -6rem;
+      margin-bottom: 0.5rem;
     }
 
-    .title {
-      font-size: 1.4rem;
+    .stack.bottom .title {
+      font-size: 2rem;
+    }
+
+    .stack.top .title {
+      font-size: 1.5rem;
     }
   }
 </style>
