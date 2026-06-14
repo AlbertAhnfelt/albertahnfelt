@@ -2,6 +2,7 @@
 import { getCollection, render } from 'astro:content'
 import Layout from '../../layouts/Layout.astro'
 import BackArrow from '../../components/BackArrow.astro'
+import MoonCorner from '../../components/MoonCorner.astro'
 
 export async function getStaticPaths() {
   const posts = await getCollection('posts')
@@ -29,6 +30,7 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
       </article>
     </div>
 
+    <MoonCorner variant="center" />
   </main>
 </Layout>
 
@@ -40,14 +42,14 @@ const formattedDate = post.data.date.toLocaleDateString('sv-SE', {
   .content {
     display: flex;
     justify-content: center;
-    padding: 2rem 1.5rem 12rem;
+    padding: 2rem 1.5rem 0;
   }
 
   .reader-text {
     width: 100%;
     max-width: 36rem;
     margin-top: 4rem;
-    margin-bottom: 8rem;
+    margin-bottom: 4rem;
     font-size: 1rem;
     line-height: 1.6;
   }

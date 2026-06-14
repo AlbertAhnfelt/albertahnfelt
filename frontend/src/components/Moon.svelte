@@ -8,6 +8,7 @@
     let cursorEl;
     let cursorX = 0, cursorY = 0;
     let locked = false;
+    let relock = false;
 
     const WHITE_CX = 117, WHITE_CY = 117, WHITE_R = 114;
     const BLACK_CX = 120, BLACK_CY = 117, BLACK_R = 119;
@@ -84,19 +85,28 @@
         }
     }
 
+    function lockCursor() {
+        const p = document.documentElement.requestPointerLock();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+    }
+
+    function enableClicky(e) {
+        const icon = e.currentTarget.querySelector('img');
+        const rect = (icon ?? e.currentTarget).getBoundingClientRect();
+        cursorX = rect.left;
+        cursorY = rect.top;
+        lockCursor();
+    }
+
     function onClick(e) {
+        if (!locked) return;
         e.preventDefault();
-        if (!locked) {
-            cursorX = e.clientX;
-            cursorY = e.clientY;
-            document.body.requestPointerLock();
-            return;
-        }
         const target = document.elementFromPoint(cursorX, cursorY);
         const clickable = target?.closest('a, button');
         if (!clickable) return;
         const href = clickable.getAttribute('href');
         if (href) {
+            relock = true;
             navigate(href);
         } else {
             clickable.click();
@@ -104,8 +114,16 @@
     }
 
     function onLockChange() {
-        locked = document.pointerLockElement === document.body;
+        locked = document.pointerLockElement === document.documentElement;
         render();
+    }
+
+    function onAfterSwap() {
+        if (!relock) return;
+        relock = false;
+        if (document.pointerLockElement !== document.documentElement) {
+            lockCursor();
+        }
     }
 
     onMount(() => {
@@ -113,16 +131,23 @@
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('click', onClick);
         document.addEventListener('pointerlockchange', onLockChange);
+        document.addEventListener('astro:after-swap', onAfterSwap);
         return () => {
             window.removeEventListener('mousemove', onMouseMove);
             window.removeEventListener('click', onClick);
             document.removeEventListener('pointerlockchange', onLockChange);
+            document.removeEventListener('astro:after-swap', onAfterSwap);
         };
     });
 </script>
 
 {#if clicky}
   <img bind:this={cursorEl} class="cursor" src="/mouse.svg" alt="" />
+  {#if !locked}
+    <button class="clicky-toggle" on:click={enableClicky} aria-label="Aktivera musläge">
+      <img src="/mouse.svg" alt="" />
+    </button>
+  {/if}
 {/if}
 
 <svg bind:this={svg} role="img" width="248" height="235" viewBox="0 0 248 235" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -146,6 +171,32 @@
     opacity: 0;
     z-index: 9999;
     will-change: transform;
+  }
+
+  .clicky-toggle {
+    position: fixed;
+    bottom: 1.5rem;
+    left: 1.5rem;
+    padding: 0.5rem;
+    background: none;
+    border: none;
+    line-height: 0;
+    cursor: pointer;
+    opacity: 0.45;
+    transform-origin: left bottom;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    z-index: 9998;
+  }
+
+  .clicky-toggle:hover {
+    opacity: 1;
+    transform: scale(var(--hover-scale));
+  }
+
+  .clicky-toggle img {
+    width: 28px;
+    height: auto;
+    display: block;
   }
 
 </style>
