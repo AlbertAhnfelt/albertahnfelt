@@ -10,6 +10,7 @@
     let locked = false;
     let relock = false;
     let hovered = null;
+    let isHome = false;
 
     const WHITE_CX = 117, WHITE_CY = 117, WHITE_R = 114;
     const BLACK_CX = 120, BLACK_CY = 117, BLACK_R = 119;
@@ -134,7 +135,12 @@
         render();
     }
 
+    function updatePath() {
+        isHome = location.pathname === '/';
+    }
+
     function onAfterSwap() {
+        updatePath();
         if (!relock) return;
         relock = false;
         if (document.pointerLockElement !== document.documentElement) {
@@ -144,6 +150,7 @@
 
     onMount(() => {
         if (!clicky) return;
+        updatePath();
         window.addEventListener('mousemove', onMouseMove);
         window.addEventListener('click', onClick);
         document.addEventListener('pointerlockchange', onLockChange);
@@ -159,7 +166,7 @@
 
 {#if clicky}
   <img bind:this={cursorEl} class="cursor" src="/mouse.svg" alt="" />
-  {#if !locked}
+  {#if !locked && isHome}
     <button class="clicky-toggle" on:click={enableClicky} aria-label="Aktivera musläge">
       <img src="/mouse.svg" alt="" />
     </button>
