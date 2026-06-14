@@ -9,6 +9,7 @@
     let cursorX = 0, cursorY = 0;
     let locked = false;
     let relock = false;
+    let hovered = null;
 
     const WHITE_CX = 117, WHITE_CY = 117, WHITE_R = 114;
     const BLACK_CX = 120, BLACK_CY = 117, BLACK_R = 119;
@@ -73,6 +74,7 @@
         cursorX = Math.max(0, Math.min(window.innerWidth, cursorX + mx));
         cursorY = Math.max(0, Math.min(window.innerHeight, cursorY + my));
         render();
+        updateHover();
 
         if (r < 1 && dist > 0) {
             const angle = Math.atan2(cursorY - cy, cursorX - cx);
@@ -83,6 +85,14 @@
             svg.style.transform = 'translate(0px, 0px)';
             setDent(0, 0);
         }
+    }
+
+    function updateHover() {
+        const el = document.elementFromPoint(cursorX, cursorY)?.closest('a, button') ?? null;
+        if (el === hovered) return;
+        hovered?.classList.remove('clicky-hover');
+        el?.classList.add('clicky-hover');
+        hovered = el;
     }
 
     function lockCursor() {
@@ -105,16 +115,22 @@
         const clickable = target?.closest('a, button');
         if (!clickable) return;
         const href = clickable.getAttribute('href');
-        if (href) {
+        if (!href) {
+            clickable.click();
+        } else if (clickable.getAttribute('target') === '_blank') {
+            window.open(href, '_blank', 'noopener');
+        } else {
             relock = true;
             navigate(href);
-        } else {
-            clickable.click();
         }
     }
 
     function onLockChange() {
         locked = document.pointerLockElement === document.documentElement;
+        if (!locked) {
+            hovered?.classList.remove('clicky-hover');
+            hovered = null;
+        }
         render();
     }
 

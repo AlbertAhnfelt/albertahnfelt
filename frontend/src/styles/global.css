@@ -51,7 +51,9 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .menu a:hover,
-.title a:hover {
+.title a:hover,
+.menu a.clicky-hover,
+.title a.clicky-hover {
   text-shadow: 0 0 0 transparent;
   transform: translateX(0.4rem);
 }

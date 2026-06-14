@@ -26,7 +26,8 @@ const { href, label, variant = 'sidebar' } = Astro.props
     transition: transform 0.15s ease;
   }
 
-  .back:hover img {
+  .back:hover img,
+  .back.clicky-hover img {
     transform: rotate(180deg) scale(var(--hover-scale));
   }
 </style>

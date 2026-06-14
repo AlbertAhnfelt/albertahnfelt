@@ -62,7 +62,8 @@ import { socials } from '../data/socials'
     transition: transform 0.15s ease, filter 0.15s ease;
   }
 
-  .socials a:hover img {
+  .socials a:hover img,
+  .socials a.clicky-hover img {
     filter: invert(1) drop-shadow(0 0 0 transparent);
     transform: scale(var(--hover-scale));
   }
