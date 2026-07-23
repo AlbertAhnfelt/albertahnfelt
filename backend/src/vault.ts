@@ -9,6 +9,20 @@ export const WRITABLE_PREFIXES = ["wiki/", "ai/"] as const;
 export const TRASH_PREFIX = "wiki/.trash/";
 export const INDEX_KEY = "wiki/index.md";
 export const INSTRUCTIONS_KEY = "ai/instructions.md";
+export const LOG_PREFIX = "ai/log/";
+
+/** "2026-07-23" in the vault owner's timezone. */
+export function vaultDate(now = new Date()): string {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Stockholm",
+    dateStyle: "short",
+  }).format(now);
+}
+
+/** Human-readable but path-safe log title: letters, digits, spaces, dashes. */
+export function isSafeLogSlug(slug: string): boolean {
+  return /^[\p{L}\p{N}][\p{L}\p{N} -]{0,80}$/u.test(slug) && !slug.endsWith(" ");
+}
 
 /** True if `key` is a safe relative vault path: no traversal, no absolute paths, .md only. */
 export function isSafeMarkdownKey(key: string): boolean {

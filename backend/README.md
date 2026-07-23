@@ -22,6 +22,11 @@ concurrent modification returns an error instead of losing a write.
 - `edit_page(path, old_string, new_string, replace_all?)` — surgical string replacement
 - `move_page(from, to)` — rename/move within writable areas
 - `delete_page(path)` — soft delete into `wiki/.trash/`
+- `log_session(title_slug, type, body, tags?)` — save a distilled session log to
+  `ai/log/YYYY-MM/YYYY-MM-DD <title>.md` with server-generated frontmatter
+  (`provenance: ai`, date, type, tags); create-only. Meant to be driven by the
+  user-invoked `log` MCP prompt (`/mcp__abbe__log` in Claude Code), which carries
+  the editorial instructions for distilling a session.
 
 Server instructions (the agents' standing orders — directory contract, index
 maintenance, conventions) are loaded from `ai/instructions.md` in the vault at

@@ -5,7 +5,10 @@ import { isAuthorized } from "./auth";
 import {
   FALLBACK_INSTRUCTIONS,
   INDEX_KEY,
+  LOG_PREFIX,
   TRASH_PREFIX,
+  isSafeLogSlug,
+  vaultDate,
   isSafeListPrefix,
   isSafeMarkdownKey,
   isWritableKey,
@@ -44,7 +47,7 @@ export class AbbeMCP extends McpAgent<Env, unknown, Props> {
     if (this.built) return;
     this.built = true;
     const instructions = this.props?.instructions ?? FALLBACK_INSTRUCTIONS;
-    const server = new McpServer({ name: "abbe", version: "0.2.0" }, { instructions });
+    const server = new McpServer({ name: "abbe", version: "0.3.0" }, { instructions });
     this.registerTools(server);
     this.resolveServer(server);
   }
@@ -240,6 +243,93 @@ export class AbbeMCP extends McpAgent<Env, unknown, Props> {
         await vault().delete(from);
         return text(`Moved ${from} -> ${to}.`);
       },
+    );
+
+    server.registerTool(
+      "log_session",
+      {
+        description:
+          "Save a distilled session log into the vault (ai/log/). Call this ONLY when the " +
+          "user explicitly asks to log/summarize the session — never on your own initiative. " +
+          "The server adds path, date and frontmatter; you supply the distilled body.",
+        inputSchema: {
+          title_slug: z
+            .string()
+            .describe(
+              'Short human title for the log, e.g. "second brain changes" or "auth ideas". ' +
+                "Letters/digits/spaces/dashes only — the server prefixes the date.",
+            ),
+          type: z.enum(["changes", "ideas"]),
+          body: z.string().min(1).describe("Distilled markdown body, without frontmatter."),
+          tags: z.array(z.string()).default([]).describe("Optional extra topic tags."),
+        },
+      },
+      async ({ title_slug, type, body, tags }) => {
+        if (!isSafeLogSlug(title_slug)) {
+          return err(
+            `Invalid title_slug "${title_slug}": letters, digits, spaces and dashes only.`,
+          );
+        }
+        const date = vaultDate();
+        const path = `${LOG_PREFIX}${date.slice(0, 7)}/${date} ${title_slug}.md`;
+        const allTags = [type, ...tags.filter((t) => t !== type)];
+        const frontmatter = [
+          "---",
+          "provenance: ai",
+          `date: ${date}`,
+          `type: ${type}`,
+          `tags: [${allTags.join(", ")}]`,
+          "---",
+          "",
+        ].join("\n");
+        const res = await vault().put(path, frontmatter + body, { ...MD, ...CREATE_ONLY });
+        if (!res) {
+          return err(
+            `Refused: ${path} already exists. Pick a different title_slug for this session.`,
+          );
+        }
+        return text(`Logged session to ${path} (${body.length} chars).`);
+      },
+    );
+
+    server.registerPrompt(
+      "log",
+      {
+        description:
+          "Distill this session into the vault's log (ai/log/) — decisions, changes, reasoning.",
+      },
+      () => ({
+        messages: [
+          {
+            role: "user" as const,
+            content: {
+              type: "text" as const,
+              text: `The user wants this session logged to their second-brain vault. Distill the conversation so far and save it with the log_session tool.
+
+What to capture — only what future-you (or the user, months from now) would actually need:
+- Decisions made, and the WHY behind each — reasoning is the most valuable thing to preserve.
+- Concrete changes shipped (code, config, deployments): what and where, as file paths or names — never code dumps.
+- Core conclusions or ideas arrived at, stated plainly.
+- Open threads: what was deliberately deferred or left unresolved.
+
+What to leave out — be ruthless:
+- Play-by-play narrative, false starts, debugging detours that led nowhere.
+- Anything derivable from the code or git history itself.
+- Pleasantries, process talk, tool mechanics.
+
+Form: aim for well under a page. Short declarative bullets over prose. It is better to drop a detail than to bury a decision.
+
+Then call log_session with:
+- title_slug: a few plain words naming what the session was about (the server prefixes the date).
+- type: "changes" if the session primarily changed things (code, systems, config), "ideas" if it was primarily thinking/exploration.
+- tags: add any extra topic tags that aid future retrieval.
+- body: the distilled markdown (no frontmatter — the server adds it).
+
+Afterwards, tell the user the saved path.`,
+            },
+          },
+        ],
+      }),
     );
 
     server.registerTool(
