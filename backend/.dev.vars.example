@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local dev. In production: wrangler secret put MCP_AUTH_TOKEN
+MCP_AUTH_TOKEN=dev-only-token

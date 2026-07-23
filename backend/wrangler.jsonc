@@ -1,0 +1,19 @@
+{
+  "name": "abbe",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "AbbeMCP", "class_name": "AbbeMCP" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AbbeMCP"] }],
+  "r2_buckets": [
+    {
+      "binding": "VAULT",
+      "bucket_name": "abbe-vault"
+    }
+  ],
+  "observability": { "enabled": true }
+  // Secrets (set via `wrangler secret put`, never here):
+  //   MCP_AUTH_TOKEN — bearer token required on every request
+}
