@@ -6,16 +6,26 @@ whole pages via `read_page`). Design doc: vault `ai/Abbe Architecture.md`.
 
 ## Layout in the `abbe-vault` R2 bucket
 
-Mirrors the Obsidian vault: `human/`, `external/`, `ai/` are read-only sources
-(`ingest` may only *add* files under `external/inbox/`, never overwrite);
-`wiki/` is the only AI-writable area (`write_page`).
+Mirrors the Obsidian vault: `human/` and `external/` are read-only sources;
+`wiki/` and `ai/` are AI-writable. Deleted pages land in `wiki/.trash/`.
 
 ## MCP tools
 
+All writes use optimistic concurrency (compare-and-swap on R2 etags): overwrites
+require the etag from a prior `read_page`, creates fail if the page exists, and
+concurrent modification returns an error instead of losing a write.
+
+- `list(prefix?)` — `ls`-style listing of folders/files under a prefix
 - `search(query)` — matches page paths + lines of `wiki/index.md`, returns paths
-- `read_page(path)` — returns full page markdown
-- `write_page(path, content)` — `wiki/**.md` only
-- `ingest(filename, content)` — create-only into `external/inbox/`
+- `read_page(path)` — full page markdown + its etag
+- `write_page(path, content, expected_etag?)` — create (no etag) or full overwrite (with etag)
+- `edit_page(path, old_string, new_string, replace_all?)` — surgical string replacement
+- `move_page(from, to)` — rename/move within writable areas
+- `delete_page(path)` — soft delete into `wiki/.trash/`
+
+Server instructions (the agents' standing orders — directory contract, index
+maintenance, conventions) are loaded from `ai/instructions.md` in the vault at
+session start, with a baked-in fallback if that page doesn't exist.
 
 ## Auth
 

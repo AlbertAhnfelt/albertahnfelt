@@ -3,12 +3,15 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { isAuthorized } from "./auth";
 import {
+  FALLBACK_INSTRUCTIONS,
   INDEX_KEY,
-  INGEST_PREFIX,
-  WRITABLE_PREFIX,
+  TRASH_PREFIX,
+  isSafeListPrefix,
   isSafeMarkdownKey,
   isWritableKey,
   listAllKeys,
+  listLevel,
+  loadInstructions,
 } from "./vault";
 
 function text(s: string) {
@@ -19,11 +22,59 @@ function err(s: string) {
   return { content: [{ type: "text" as const, text: s }], isError: true };
 }
 
-export class AbbeMCP extends McpAgent<Env, unknown, {}> {
-  server = new McpServer({ name: "abbe", version: "0.1.0" });
+/** R2 put precondition for "create only if the key does not exist yet". */
+const CREATE_ONLY = { onlyIf: new Headers({ "If-None-Match": "*" }) };
+
+const MD = { httpMetadata: { contentType: "text/markdown; charset=utf-8" } };
+
+const WRITE_SCOPE_MSG = "writes are only allowed under wiki/ or ai/ (and never into the trash)";
+
+type Props = { instructions?: string };
+
+export class AbbeMCP extends McpAgent<Env, unknown, Props> {
+  // The server is built in init() (from props), never via I/O in the DO startup
+  // path — R2 calls inside the Durable Object's blockConcurrencyWhile hang.
+  private resolveServer!: (s: McpServer) => void;
+  server: Promise<McpServer> = new Promise((resolve) => {
+    this.resolveServer = resolve;
+  });
+  private built = false;
 
   async init() {
-    this.server.registerTool(
+    if (this.built) return;
+    this.built = true;
+    const instructions = this.props?.instructions ?? FALLBACK_INSTRUCTIONS;
+    const server = new McpServer({ name: "abbe", version: "0.2.0" }, { instructions });
+    this.registerTools(server);
+    this.resolveServer(server);
+  }
+
+  private registerTools(server: McpServer) {
+    const vault = () => this.env.VAULT;
+
+    server.registerTool(
+      "list",
+      {
+        description:
+          "List the vault like `ls`: folders and files directly under a prefix. " +
+          'Use prefix "" (or omit) for the vault root, "wiki/" for the wiki, etc.',
+        inputSchema: { prefix: z.string().default("") },
+      },
+      async ({ prefix }) => {
+        if (!isSafeListPrefix(prefix)) return err(`Invalid prefix "${prefix}".`);
+        const { dirs, files } = await listLevel(vault(), prefix);
+        if (dirs.length === 0 && files.length === 0) {
+          return text(`Nothing under "${prefix}".`);
+        }
+        const lines = [
+          ...dirs.map((d) => `${d} (dir)`),
+          ...files.map((f) => `${f.key} (${f.size} B)`),
+        ];
+        return text(lines.join("\n"));
+      },
+    );
+
+    server.registerTool(
       "search",
       {
         description:
@@ -39,17 +90,19 @@ export class AbbeMCP extends McpAgent<Env, unknown, {}> {
           return terms.some((t) => l.includes(t));
         };
 
-        const keys = await listAllKeys(this.env.VAULT);
-        const pathHits = keys.filter((k) => k.endsWith(".md") && matches(k));
+        const keys = await listAllKeys(vault());
+        const pathHits = keys.filter(
+          (k) => k.endsWith(".md") && !k.startsWith(TRASH_PREFIX) && matches(k),
+        );
 
         let indexHits: string[] = [];
-        const index = await this.env.VAULT.get(INDEX_KEY);
+        const index = await vault().get(INDEX_KEY);
         if (index) {
           indexHits = (await index.text()).split("\n").filter(matches);
         }
 
         if (pathHits.length === 0 && indexHits.length === 0) {
-          return text(`No matches for "${query}". Try broader terms, or list pages via search with a directory name (e.g. "wiki").`);
+          return text(`No matches for "${query}". Try broader terms, or explore with list.`);
         }
         const parts: string[] = [];
         if (pathHits.length) parts.push(`## Matching pages\n${pathHits.join("\n")}`);
@@ -58,75 +111,169 @@ export class AbbeMCP extends McpAgent<Env, unknown, {}> {
       },
     );
 
-    this.server.registerTool(
+    server.registerTool(
       "read_page",
       {
-        description: "Read a full vault page (markdown) by its path, e.g. wiki/some-topic.md",
+        description:
+          "Read a full vault page (markdown) by its path, e.g. wiki/some-topic.md. " +
+          "Returns the page's etag — keep it if you intend to overwrite the page.",
         inputSchema: { path: z.string().min(1) },
       },
       async ({ path }) => {
         if (!isSafeMarkdownKey(path)) {
           return err(`Invalid path "${path}": must be a relative .md path with no traversal.`);
         }
-        const obj = await this.env.VAULT.get(path);
-        if (!obj) return err(`Page not found: ${path}. Use search to locate pages.`);
-        return text(await obj.text());
+        const obj = await vault().get(path);
+        if (!obj) return err(`Page not found: ${path}. Use search or list to locate pages.`);
+        return {
+          content: [
+            { type: "text" as const, text: `${path} | etag: ${obj.etag}` },
+            { type: "text" as const, text: await obj.text() },
+          ],
+        };
       },
     );
 
-    this.server.registerTool(
+    server.registerTool(
       "write_page",
       {
         description:
-          `Create or overwrite a page under ${WRITABLE_PREFIX} (the only AI-writable area; ` +
-          "human/, external/ and ai/ are read-only sources). Overwrites are PERMANENT — there is " +
-          "no version history, so read the existing page first and preserve content you aren't changing.",
+          "Create a new page, or fully overwrite an existing one. To CREATE: omit expected_etag " +
+          "(fails if the page already exists). To OVERWRITE: pass the etag from read_page " +
+          "(fails if the page changed since you read it — re-read and retry). " +
+          "For small changes to existing pages prefer edit_page. " +
+          `Writable areas: wiki/ and ai/ only; overwrites are permanent (no version history). ` +
+          `After creating a wiki page, add it to ${INDEX_KEY}.`,
         inputSchema: {
-          path: z.string().min(1).describe(`Must start with ${WRITABLE_PREFIX} and end with .md`),
+          path: z.string().min(1),
           content: z.string(),
+          expected_etag: z.string().optional(),
         },
       },
-      async ({ path, content }) => {
-        if (!isWritableKey(path)) {
-          return err(`Refused: writes are only allowed to ${WRITABLE_PREFIX}**.md (got "${path}").`);
+      async ({ path, content, expected_etag }) => {
+        if (!isWritableKey(path)) return err(`Refused: ${WRITE_SCOPE_MSG} (got "${path}").`);
+        if (expected_etag) {
+          const res = await vault().put(path, content, {
+            ...MD,
+            onlyIf: { etagMatches: expected_etag },
+          });
+          if (!res) {
+            return err(
+              `Conflict: ${path} changed since you read it (or does not exist). ` +
+                "Re-read the page and retry with the fresh etag.",
+            );
+          }
+          return text(`Overwrote ${path} (${content.length} chars). New etag: ${res.etag}`);
         }
-        const existed = (await this.env.VAULT.head(path)) !== null;
-        await this.env.VAULT.put(path, content, {
-          httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-        });
-        return text(`${existed ? "Updated" : "Created"} ${path} (${content.length} chars).`);
+        const res = await vault().put(path, content, { ...MD, ...CREATE_ONLY });
+        if (!res) {
+          return err(
+            `Refused: ${path} already exists. Read it and pass expected_etag to overwrite.`,
+          );
+        }
+        return text(`Created ${path} (${content.length} chars). Etag: ${res.etag}`);
       },
     );
 
-    this.server.registerTool(
-      "ingest",
+    server.registerTool(
+      "edit_page",
       {
         description:
-          `Add new source material to the vault inbox (${INGEST_PREFIX}). Create-only: ` +
-          "existing sources are never modified. Use write_page for wiki pages.",
+          "Make a surgical edit to an existing page by exact string replacement — cheaper and " +
+          "safer than rewriting the whole page. old_string must match exactly once (set " +
+          "replace_all to replace every occurrence). To append, use the page's final line as " +
+          "old_string and include it in new_string.",
         inputSchema: {
-          filename: z
-            .string()
-            .min(1)
-            .describe("Bare filename like meeting-notes-2026-07-23.md (no directories)"),
-          content: z.string().min(1),
+          path: z.string().min(1),
+          old_string: z.string().min(1),
+          new_string: z.string(),
+          replace_all: z.boolean().default(false),
         },
       },
-      async ({ filename, content }) => {
-        if (filename.includes("/") || !isSafeMarkdownKey(filename)) {
-          return err(`Invalid filename "${filename}": bare .md filename only.`);
+      async ({ path, old_string, new_string, replace_all }) => {
+        if (!isWritableKey(path)) return err(`Refused: ${WRITE_SCOPE_MSG} (got "${path}").`);
+        const obj = await vault().get(path);
+        if (!obj) return err(`Page not found: ${path}.`);
+        const body = await obj.text();
+        const count = body.split(old_string).length - 1;
+        if (count === 0) {
+          return err(`old_string not found in ${path}. Read the page and match its text exactly.`);
         }
-        const key = INGEST_PREFIX + filename;
-        if (await this.env.VAULT.head(key)) {
-          return err(`Refused: ${key} already exists. Sources are immutable; pick a new filename.`);
+        if (count > 1 && !replace_all) {
+          return err(
+            `old_string occurs ${count} times in ${path}. Add more surrounding context to make ` +
+              "it unique, or set replace_all.",
+          );
         }
-        await this.env.VAULT.put(key, content, {
-          httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+        const updated = replace_all
+          ? body.split(old_string).join(new_string)
+          : body.replace(old_string, new_string);
+        const res = await vault().put(path, updated, {
+          ...MD,
+          onlyIf: { etagMatches: obj.etag },
         });
-        return text(`Ingested ${key} (${content.length} chars).`);
+        if (!res) {
+          return err(`Conflict: ${path} changed while editing. Re-read the page and retry.`);
+        }
+        return text(
+          `Edited ${path}: ${replace_all ? count : 1} replacement(s). New etag: ${res.etag}`,
+        );
+      },
+    );
+
+    server.registerTool(
+      "move_page",
+      {
+        description:
+          "Move or rename a page within the writable areas (wiki/ and ai/). Fails if the " +
+          `destination already exists. Remember to update ${INDEX_KEY} and any links.`,
+        inputSchema: { from: z.string().min(1), to: z.string().min(1) },
+      },
+      async ({ from, to }) => {
+        if (!isWritableKey(from)) return err(`Refused: ${WRITE_SCOPE_MSG} (from "${from}").`);
+        if (!isWritableKey(to)) return err(`Refused: ${WRITE_SCOPE_MSG} (to "${to}").`);
+        const obj = await vault().get(from);
+        if (!obj) return err(`Page not found: ${from}.`);
+        const body = await obj.text();
+        const res = await vault().put(to, body, { ...MD, ...CREATE_ONLY });
+        if (!res) return err(`Refused: destination ${to} already exists.`);
+        await vault().delete(from);
+        return text(`Moved ${from} -> ${to}.`);
+      },
+    );
+
+    server.registerTool(
+      "delete_page",
+      {
+        description:
+          "Soft-delete a page from the writable areas: it is moved into the trash " +
+          `(${TRASH_PREFIX}) rather than destroyed. Remember to update ${INDEX_KEY}.`,
+        inputSchema: { path: z.string().min(1) },
+      },
+      async ({ path }) => {
+        if (!isWritableKey(path)) return err(`Refused: ${WRITE_SCOPE_MSG} (got "${path}").`);
+        const obj = await vault().get(path);
+        if (!obj) return err(`Page not found: ${path}.`);
+        const body = await obj.text();
+        const trashKey = `${TRASH_PREFIX}${path}.${Date.now()}`;
+        await vault().put(trashKey, body, MD);
+        await vault().delete(path);
+        return text(`Deleted ${path} (recoverable at ${trashKey}).`);
       },
     );
   }
+}
+
+// Per-isolate cache so each /mcp request doesn't re-read the instructions page.
+let instructionsCache: { value: string; expires: number } | undefined;
+const INSTRUCTIONS_TTL_MS = 60_000;
+
+async function getInstructions(env: Env): Promise<string> {
+  const now = Date.now();
+  if (instructionsCache && instructionsCache.expires > now) return instructionsCache.value;
+  const value = await loadInstructions(env.VAULT);
+  instructionsCache = { value, expires: now + INSTRUCTIONS_TTL_MS };
+  return value;
 }
 
 export default {
@@ -142,6 +289,7 @@ export default {
           headers: { "WWW-Authenticate": "Bearer" },
         });
       }
+      (ctx as { props?: Props }).props = { instructions: await getInstructions(env) };
       return AbbeMCP.serve("/mcp", { binding: "AbbeMCP" }).fetch(request, env, ctx);
     }
     return new Response("Not found", { status: 404 });
