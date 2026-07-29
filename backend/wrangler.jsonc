@@ -13,7 +13,16 @@
       "bucket_name": "abbe-vault"
     }
   ],
+  "kv_namespaces": [
+    {
+      // OAuth grants, tokens (hashed) and dynamically registered clients.
+      "binding": "OAUTH_KV",
+      "id": "9be72ae12d3b4cf0a326b7ec0ed89895"
+    }
+  ],
   "observability": { "enabled": true }
   // Secrets (set via `wrangler secret put`, never here):
-  //   MCP_AUTH_TOKEN — bearer token required on every request
+  //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET — Google OAuth app credentials
+  //   ALLOWED_EMAILS — comma-separated allowlist of Google accounts
+  //   MCP_AUTH_TOKEN — static bearer token for headless agents (bypasses OAuth)
 }

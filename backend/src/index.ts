@@ -1,7 +1,9 @@
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { isAuthorized } from "./auth";
+import googleHandler, { type GrantProps } from "./oauth-google";
 import {
   FALLBACK_INSTRUCTIONS,
   INDEX_KEY,
@@ -32,7 +34,12 @@ const MD = { httpMetadata: { contentType: "text/markdown; charset=utf-8" } };
 
 const WRITE_SCOPE_MSG = "writes are only allowed under wiki/ or ai/ (and never into the trash)";
 
-type Props = { instructions?: string };
+/**
+ * What the Durable Object sees. `email`/`name` arrive from the OAuth grant (absent
+ * on the static-token path); `instructions` is injected per request by the
+ * ingress handler, since R2 reads in the DO's startup path hang.
+ */
+type Props = Partial<GrantProps> & { instructions?: string };
 
 export class AbbeMCP extends McpAgent<Env, unknown, Props> {
   // The server is built in init() (from props), never via I/O in the DO startup
@@ -366,22 +373,46 @@ async function getInstructions(env: Env): Promise<string> {
   return value;
 }
 
+const mcpTransport = AbbeMCP.serve("/mcp", { binding: "AbbeMCP" });
+
+/** Set the props the Durable Object reads, preserving anything already there. */
+function withProps(ctx: ExecutionContext, extra: Props): void {
+  const slot = ctx as { props?: Props };
+  slot.props = { ...slot.props, ...extra };
+}
+
+/**
+ * The authenticated /mcp endpoint. OAuthProvider only reaches this after it has
+ * validated an access token and decrypted the grant's props onto ctx.props, so
+ * all that is left is to add the vault instructions.
+ */
+const mcpApiHandler = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    withProps(ctx, { instructions: await getInstructions(env) });
+    return mcpTransport.fetch(request, env, ctx);
+  },
+};
+
+const oauth = new OAuthProvider({
+  apiHandlers: { "/mcp": mcpApiHandler },
+  // Owns /authorize, /callback, /approve, /health and anything unmatched.
+  defaultHandler: googleHandler as ExportedHandler,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/token",
+  clientRegistrationEndpoint: "/register",
+  scopesSupported: ["vault"],
+});
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Static-token path for headless agents that cannot complete a browser
+    // login. Interactive clients should use OAuth; this bypasses it entirely,
+    // so MCP_AUTH_TOKEN stays as privileged as the vault itself.
     const url = new URL(request.url);
-    if (url.pathname === "/" || url.pathname === "/health") {
-      return new Response("abbe: ok", { status: 200 });
+    if (url.pathname.startsWith("/mcp") && (await isAuthorized(request, env.MCP_AUTH_TOKEN))) {
+      withProps(ctx, { instructions: await getInstructions(env) });
+      return mcpTransport.fetch(request, env, ctx);
     }
-    if (url.pathname.startsWith("/mcp")) {
-      if (!(await isAuthorized(request, env.MCP_AUTH_TOKEN))) {
-        return new Response("Unauthorized", {
-          status: 401,
-          headers: { "WWW-Authenticate": "Bearer" },
-        });
-      }
-      (ctx as { props?: Props }).props = { instructions: await getInstructions(env) };
-      return AbbeMCP.serve("/mcp", { binding: "AbbeMCP" }).fetch(request, env, ctx);
-    }
-    return new Response("Not found", { status: 404 });
+    return oauth.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

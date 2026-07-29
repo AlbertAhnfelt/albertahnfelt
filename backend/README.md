@@ -34,24 +34,47 @@ session start, with a baked-in fallback if that page doesn't exist.
 
 ## Auth
 
-Bearer token on every `/mcp` request, checked with a constant-time digest
-comparison. Set it with `wrangler secret put MCP_AUTH_TOKEN`. Local dev reads
-`.dev.vars` (copy from `.dev.vars.example`). OAuth upgrade planned later.
+OAuth 2.1, with Google as the identity provider. Abbe is its own OAuth server
+(`@cloudflare/workers-oauth-provider`, grants in the `OAUTH_KV` namespace) and
+issues its own opaque tokens to MCP clients; Google only establishes who is
+asking. Clients register themselves, so no token is ever copied by hand.
 
-## Deploy (once R2 is enabled on the account)
+`src/oauth-google.ts` implements the upstream flow: `/authorize` bounces to
+Google, `/callback` exchanges the code and checks the verified email against
+`ALLOWED_EMAILS`, and `/approve` mints the grant. The parsed auth request
+round-trips through the browser inside Google's `state` parameter, HMAC-signed
+so nobody can substitute their own `redirect_uri`. The consent screen on
+`/callback` is what prevents a link someone else crafted from pointing a token
+somewhere else — it names the client and its redirect target before anything is
+issued.
+
+`MCP_AUTH_TOKEN` remains as a static-bearer path on `/mcp` for headless agents
+that cannot complete a browser login. It bypasses OAuth entirely, so it is as
+privileged as the vault itself.
+
+Local dev reads `.dev.vars` (copy from `.dev.vars.example`).
+
+## Deploy
 
 ```sh
 wrangler r2 bucket create abbe-vault
-./scripts/upload-vault.sh            # seed from ~/Documents/albertahnfelt-vault
-wrangler secret put MCP_AUTH_TOKEN   # paste a long random token
+./scripts/upload-vault.sh                 # seed from ~/Documents/albertahnfelt-vault
+wrangler kv namespace create OAUTH_KV     # id goes in wrangler.jsonc
+wrangler secret put GOOGLE_CLIENT_ID
+wrangler secret put GOOGLE_CLIENT_SECRET
+wrangler secret put ALLOWED_EMAILS        # comma-separated
+wrangler secret put MCP_AUTH_TOKEN        # long random token, headless use only
 npm run deploy
 ```
 
-Connect from Claude Code:
+The Google OAuth client (Google Cloud console → Credentials → OAuth client ID,
+type "Web application") needs
+`https://abbe.<subdomain>.workers.dev/callback` as an authorized redirect URI.
+
+Connect from Claude Code — no token, the browser flow handles it:
 
 ```sh
-claude mcp add abbe --transport http https://abbe.<subdomain>.workers.dev/mcp \
-  --header "Authorization: Bearer <token>"
+claude mcp add abbe --transport http https://abbe.<subdomain>.workers.dev/mcp
 ```
 
 ## Dev

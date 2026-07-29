@@ -1,2 +1,13 @@
-# Copy to .dev.vars for local dev. In production: wrangler secret put MCP_AUTH_TOKEN
+# Copy to .dev.vars for local dev. In production each of these is a
+# `wrangler secret put <NAME>` instead.
+
+# Google OAuth app credentials (Google Cloud console > Credentials).
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Comma-separated Google accounts allowed to connect. This is the "only me" gate.
+ALLOWED_EMAILS=you@example.com
+
+# Static bearer token for headless agents; bypasses OAuth, so treat it as
+# equivalent to full vault access.
 MCP_AUTH_TOKEN=dev-only-token
