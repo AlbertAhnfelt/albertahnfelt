@@ -165,8 +165,12 @@ import MoonCorner from '../components/MoonCorner.astro'
 </script>
 
 <style>
+  /* Flex column so the moon's `margin-top: auto` can push it to the bottom of
+     a short page, and get pushed down by a long conversation instead. */
   main {
     min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
 
   .content {
@@ -179,7 +183,6 @@ import MoonCorner from '../components/MoonCorner.astro'
     width: 100%;
     max-width: 36rem;
     margin-top: 4rem;
-    margin-bottom: 2rem;
     font-size: 1rem;
     line-height: 1.6;
   }
@@ -218,14 +221,6 @@ import MoonCorner from '../components/MoonCorner.astro'
   .term {
     --me: #e2614f;
     --abbe: #7fa6ff;
-    /* Clears the fixed moon so the prompt never ends up behind it. */
-    padding-bottom: 12rem;
-  }
-
-  @media (min-width: 768px) {
-    .term {
-      padding-bottom: 17rem;
-    }
   }
 
   .term h1 {
