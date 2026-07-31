@@ -1,5 +1,9 @@
 # environment variables
 .env
 
+# mess
+backend/.DS_Store
+node_modules/.cache/
+
 # vibecoding acknowledgment
 .claude
