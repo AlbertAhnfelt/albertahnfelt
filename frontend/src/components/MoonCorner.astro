@@ -22,6 +22,19 @@ const { variant = 'bottom' } = Astro.props
     padding: 3rem 0 2rem;
   }
 
+  /* Pinned to the viewport bottom, horizontally centred — for pages whose
+     content grows downward and shouldn't drag the moon along with it. */
+  .stack.bottom-center {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0;
+  }
+
   .stack.top {
     position: absolute;
     top: 1rem;
@@ -34,7 +47,8 @@ const { variant = 'bottom' } = Astro.props
   }
 
   .stack.bottom .moon,
-  .stack.center .moon {
+  .stack.center .moon,
+  .stack.bottom-center .moon {
     position: relative;
     left: auto;
     width: 8rem;
@@ -79,13 +93,15 @@ const { variant = 'bottom' } = Astro.props
       margin-bottom: 0.5rem;
     }
 
-    .stack.center .moon {
+    .stack.center .moon,
+    .stack.bottom-center .moon {
       width: 12rem;
       height: 12rem;
     }
 
     .stack.bottom .title,
-    .stack.center .title {
+    .stack.center .title,
+    .stack.bottom-center .title {
       font-size: 2rem;
     }
 
