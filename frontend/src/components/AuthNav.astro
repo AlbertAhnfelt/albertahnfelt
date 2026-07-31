@@ -1,0 +1,56 @@
+---
+// The site is statically built, so nothing here can be rendered per-visitor:
+// both links ship in every copy of the HTML and exactly one is revealed once the
+// Worker answers "am I signed in?".
+//
+// This is presentation only. /abbe is public HTML like every other page — the
+// real gate is the session cookie the Worker checks on anything that returns
+// actual vault content.
+---
+
+<span class="auth-nav" data-auth-nav>
+  <a class="auth-link" href="/abbe" data-auth="in" hidden>abbe</a>
+  <a class="auth-link" href="/api/abbe/web/login?returnTo=/abbe" data-auth="out" hidden>logga in</a>
+</span>
+
+<script>
+  const resolve = async (root: HTMLElement) => {
+    // Each render gets one pass; a client-side navigation brings a fresh,
+    // unmarked element.
+    if (root.dataset.ready) return
+    root.dataset.ready = '1'
+
+    let signedIn = false
+    try {
+      const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
+      signedIn = res.ok
+    } catch {
+      // Offline, or the Worker is down. Fall through as signed out.
+    }
+
+    for (const link of root.querySelectorAll<HTMLElement>('[data-auth]')) {
+      link.hidden = link.dataset.auth !== (signedIn ? 'in' : 'out')
+    }
+  }
+
+  const run = () => {
+    for (const root of document.querySelectorAll<HTMLElement>('[data-auth-nav]')) resolve(root)
+  }
+
+  run()
+  document.addEventListener('astro:page-load', run)
+</script>
+
+<style>
+  /* Let the two links sit in the parent menu's flex flow as if the wrapper
+     weren't here. */
+  .auth-nav {
+    display: contents;
+  }
+
+  /* .menu a sets display: inline-block, which would otherwise beat the browser's
+     own [hidden] rule. */
+  .auth-link[hidden] {
+    display: none;
+  }
+</style>

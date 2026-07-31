@@ -15,11 +15,21 @@
   ],
   "kv_namespaces": [
     {
-      // OAuth grants, tokens (hashed) and dynamically registered clients.
+      // OAuth grants, tokens (hashed) and dynamically registered clients,
+      // plus website sessions (hashed) under the `websession:` prefix.
       "binding": "OAUTH_KV",
       "id": "9be72ae12d3b4cf0a326b7ec0ed89895"
     }
   ],
+  "vars": {
+    // Where the browser reaches the /web/* endpoints: the website's origin plus
+    // the path prefix its proxy rewrites onto this Worker. Not secrets, but they
+    // must be config rather than request-derived — Google's redirect_uri and the
+    // session cookie's Path are built from them, and behind the proxy the
+    // inbound Host is the workers.dev name.
+    "SITE_ORIGIN": "https://www.albertahnfelt.com",
+    "API_BASE_PATH": "/api/abbe"
+  },
   "observability": { "enabled": true }
   // Secrets (set via `wrangler secret put`, never here):
   //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET — Google OAuth app credentials

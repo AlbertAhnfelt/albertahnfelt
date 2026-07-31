@@ -4,6 +4,7 @@ import { McpAgent } from "agents/mcp";
 import { z } from "zod";
 import { isAuthorized } from "./auth";
 import googleHandler, { type GrantProps } from "./oauth-google";
+import { handleWebSession } from "./web-session";
 import {
   FALLBACK_INSTRUCTIONS,
   INDEX_KEY,
@@ -405,10 +406,18 @@ const oauth = new OAuthProvider({
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Browser sessions for the website. Handled ahead of the OAuth provider and
+    // entirely apart from it: a /web session cookie is never a credential for
+    // /mcp, so it cannot be spent on vault tools.
+    if (url.pathname.startsWith("/web/")) {
+      return handleWebSession(request, env);
+    }
+
     // Static-token path for headless agents that cannot complete a browser
     // login. Interactive clients should use OAuth; this bypasses it entirely,
     // so MCP_AUTH_TOKEN stays as privileged as the vault itself.
-    const url = new URL(request.url);
     if (url.pathname.startsWith("/mcp") && (await isAuthorized(request, env.MCP_AUTH_TOKEN))) {
       withProps(ctx, { instructions: await getInstructions(env) });
       return mcpTransport.fetch(request, env, ctx);

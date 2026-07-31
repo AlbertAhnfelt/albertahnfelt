@@ -1,0 +1,117 @@
+---
+import SidebarLayout from '../layouts/SidebarLayout.astro'
+
+// Placeholder for the Abbe interface. Everything below is static public HTML —
+// signed-in state only decides which block is shown. When this page starts
+// showing vault content it has to come from a cookie-authenticated Worker
+// endpoint, never from anything baked in at build time.
+---
+
+<SidebarLayout title="Abbe">
+  <section class="abbe" data-abbe>
+    <p data-state="loading">…</p>
+
+    <div data-state="out" hidden>
+      <p>Den här sidan är inte för allmänheten.</p>
+      <p>
+        <a class="login" href="/api/abbe/web/login?returnTo=/abbe">logga in</a>
+      </p>
+    </div>
+
+    <div data-state="in" hidden>
+      <p>Hej <span data-email></span>!</p>
+      <p>Här kommer Abbe att bo.</p>
+      <p><button type="button" data-logout>logga ut</button></p>
+    </div>
+  </section>
+</SidebarLayout>
+
+<script>
+  const show = (root: HTMLElement, state: 'loading' | 'out' | 'in') => {
+    for (const block of root.querySelectorAll<HTMLElement>('[data-state]')) {
+      block.hidden = block.dataset.state !== state
+    }
+  }
+
+  const resolve = async (root: HTMLElement) => {
+    if (root.dataset.ready) return
+    root.dataset.ready = '1'
+
+    const logout = root.querySelector<HTMLButtonElement>('[data-logout]')
+    logout?.addEventListener('click', async () => {
+      logout.disabled = true
+      await fetch('/api/abbe/web/logout', { method: 'POST' })
+      window.location.href = '/'
+    })
+
+    try {
+      const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
+      if (!res.ok) return show(root, 'out')
+
+      const { email } = (await res.json()) as { email?: string }
+      const slot = root.querySelector<HTMLElement>('[data-email]')
+      // textContent, never innerHTML: this string comes from outside the page.
+      if (slot) slot.textContent = email ?? ''
+      show(root, 'in')
+    } catch {
+      show(root, 'out')
+    }
+  }
+
+  const run = () => {
+    for (const root of document.querySelectorAll<HTMLElement>('[data-abbe]')) resolve(root)
+  }
+
+  run()
+  document.addEventListener('astro:page-load', run)
+</script>
+
+<style>
+  .abbe {
+    max-width: 28rem;
+    margin-top: 2rem;
+    justify-self: center;
+    font-size: 1.05rem;
+  }
+
+  @media (min-width: 768px) {
+    .abbe {
+      margin-top: 6rem;
+    }
+  }
+
+  .abbe p {
+    margin-bottom: 1.2rem;
+  }
+
+  .abbe p:last-child {
+    margin-bottom: 0;
+  }
+
+  .login {
+    text-shadow: 0.12rem 0 0 var(--black);
+    transition: transform 0.15s ease, text-shadow 0.15s ease;
+    display: inline-block;
+  }
+
+  .login:hover,
+  .login.clicky-hover {
+    text-shadow: 0 0 0 transparent;
+    transform: translateX(0.4rem);
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0.6;
+    text-decoration: underline;
+  }
+
+  button:hover {
+    opacity: 1;
+  }
+</style>

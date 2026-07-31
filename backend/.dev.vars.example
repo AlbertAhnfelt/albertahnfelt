@@ -11,3 +11,12 @@ ALLOWED_EMAILS=you@example.com
 # Static bearer token for headless agents; bypasses OAuth, so treat it as
 # equivalent to full vault access.
 MCP_AUTH_TOKEN=dev-only-token
+
+# Website browser login. In production these come from wrangler.jsonc `vars`
+# (they are config, not secrets); uncomment here to point the flow at a local
+# `astro dev` instead. Over plain http the session cookie is set without the
+# Secure flag, which only works because localhost is a trusted origin — and
+# http://localhost:4321/api/abbe/web/callback must also be an authorized
+# redirect URI on the Google OAuth client for a local login to complete.
+# SITE_ORIGIN=http://localhost:4321
+# API_BASE_PATH=/api/abbe

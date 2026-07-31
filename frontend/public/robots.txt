@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
+Disallow: /abbe
+Disallow: /api/
 
 Sitemap: https://albertahnfelt.com/sitemap-index.xml

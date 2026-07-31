@@ -1,5 +1,8 @@
 /**
- * Google-backed authentication for Abbe's OAuth provider.
+ * Google-backed authentication for Abbe's OAuth provider — the credential path
+ * for MCP clients (agents), which hold bearer tokens rather than cookies. The
+ * website's browser session is a separate path; see `web-session.ts`. Both share
+ * one identity provider and one allowlist, in `google.ts`.
  *
  * This is the OAuthProvider's `defaultHandler`: it owns everything except /mcp.
  * The flow, per the MCP third-party-provider pattern — Abbe issues its own
@@ -16,10 +19,8 @@
  */
 
 import type { AuthRequest, ClientInfo, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
-
-const GOOGLE_AUTHORIZE = "https://accounts.google.com/o/oauth2/v2/auth";
-const GOOGLE_TOKEN = "https://oauth2.googleapis.com/token";
-const GOOGLE_ISSUERS = ["accounts.google.com", "https://accounts.google.com"];
+import { authorizeUrl, identityFromCode, isAllowedEmail, sign, unsign } from "./google";
+import { escapeHtml, page } from "./html";
 
 /** How long the human has to click Approve after signing in with Google. */
 const APPROVAL_TTL_MS = 5 * 60 * 1000;
@@ -29,141 +30,11 @@ type Env = Cloudflare.Env & { OAUTH_PROVIDER: OAuthHelpers };
 /** The identity we store on the grant; surfaces to tools as ctx.props. */
 export type GrantProps = { email: string; name?: string };
 
-/* ------------------------------------------------------------------ signing */
-
-/**
- * HMAC key for the browser round trip. Derived from the Google client secret so
- * there is no extra secret to manage: it is already a high-entropy value only
- * the Worker knows, and it is never used as an HMAC key by Google itself.
- */
-async function signingKey(env: Env): Promise<CryptoKey> {
-  return crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(env.GOOGLE_CLIENT_SECRET),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign", "verify"],
-  );
-}
-
-function b64urlEncode(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function b64urlDecode(s: string): Uint8Array {
-  const padded = s.replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
-}
-
-/** Serialize `payload` as `<base64url json>.<base64url hmac>`. */
-async function sign(env: Env, payload: unknown): Promise<string> {
-  const body = b64urlEncode(new TextEncoder().encode(JSON.stringify(payload)));
-  const mac = await crypto.subtle.sign(
-    "HMAC",
-    await signingKey(env),
-    new TextEncoder().encode(body),
-  );
-  return `${body}.${b64urlEncode(new Uint8Array(mac))}`;
-}
-
-/** Verify and parse a value produced by `sign`. Returns null on any tampering. */
-async function unsign<T>(env: Env, token: string): Promise<T | null> {
-  const dot = token.lastIndexOf(".");
-  if (dot < 1) return null;
-  const body = token.slice(0, dot);
-  try {
-    const ok = await crypto.subtle.verify(
-      "HMAC",
-      await signingKey(env),
-      b64urlDecode(token.slice(dot + 1)),
-      new TextEncoder().encode(body),
-    );
-    if (!ok) return null;
-    return JSON.parse(new TextDecoder().decode(b64urlDecode(body))) as T;
-  } catch {
-    return null;
-  }
-}
-
-/* -------------------------------------------------------------------- pages */
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function page(title: string, body: string, status = 200): Response {
-  return new Response(
-    `<!doctype html><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font: 16px/1.55 ui-sans-serif, system-ui, sans-serif; max-width: 30rem;
-         margin: 12vh auto; padding: 0 1.5rem; }
-  h1 { font-size: 1.3rem; margin-bottom: 1rem; }
-  dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .9rem;
-       margin: 1.25rem 0; font-size: .9rem; }
-  dt { opacity: .6; }
-  dd { margin: 0; overflow-wrap: anywhere; }
-  button { font: inherit; padding: .6rem 1.4rem; border: 0; border-radius: .5rem;
-           background: #2563eb; color: #fff; cursor: pointer; }
-  code { font-size: .9em; }
-</style>
-${body}`,
-    { status, headers: { "content-type": "text/html; charset=utf-8" } },
-  );
-}
-
-/* ------------------------------------------------------------------- google */
-
-function callbackUrl(request: Request): string {
-  return new URL("/callback", request.url).toString();
-}
-
 type StatePayload = { req: AuthRequest };
 type ApprovalPayload = { req: AuthRequest; email: string; name?: string; iat: number };
 
-type IdTokenClaims = {
-  iss?: string;
-  aud?: string;
-  exp?: number;
-  email?: string;
-  email_verified?: boolean;
-  name?: string;
-};
-
-/**
- * Read the claims out of an id_token.
- *
- * The signature is deliberately not checked: this token was just received in the
- * body of a TLS connection we opened to Google's token endpoint and authenticated
- * with our client secret, so the channel — not the signature — is what proves
- * provenance. (OpenID Connect Core 3.1.3.7 permits this for the code flow.)
- * Everything a caller could influence is still validated below.
- */
-function readIdToken(idToken: string): IdTokenClaims | null {
-  const parts = idToken.split(".");
-  if (parts.length !== 3) return null;
-  try {
-    return JSON.parse(new TextDecoder().decode(b64urlDecode(parts[1]))) as IdTokenClaims;
-  } catch {
-    return null;
-  }
-}
-
-function allowedEmails(env: Env): string[] {
-  return (env.ALLOWED_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
+function callbackUrl(request: Request): string {
+  return new URL("/callback", request.url).toString();
 }
 
 /* ----------------------------------------------------------------- handlers */
@@ -182,16 +53,7 @@ async function handleAuthorize(request: Request, env: Env): Promise<Response> {
   }
 
   const state = await sign(env, { req: authRequest } satisfies StatePayload);
-  const google = new URL(GOOGLE_AUTHORIZE);
-  google.searchParams.set("client_id", env.GOOGLE_CLIENT_ID);
-  google.searchParams.set("redirect_uri", callbackUrl(request));
-  google.searchParams.set("response_type", "code");
-  google.searchParams.set("scope", "openid email profile");
-  google.searchParams.set("state", state);
-  // Always show the account chooser: on a shared browser this makes it obvious
-  // which identity is about to be handed to the vault.
-  google.searchParams.set("prompt", "select_account");
-  return Response.redirect(google.toString(), 302);
+  return Response.redirect(authorizeUrl(env, callbackUrl(request), state), 302);
 }
 
 async function handleCallback(request: Request, env: Env): Promise<Response> {
@@ -212,52 +74,27 @@ async function handleCallback(request: Request, env: Env): Promise<Response> {
     return page("Bad request", "<h1>Bad request</h1><p>The sign-in state was missing or tampered with. Start over.</p>", 400);
   }
 
-  const tokenRes = await fetch(GOOGLE_TOKEN, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      code,
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: callbackUrl(request),
-      grant_type: "authorization_code",
-    }),
-  });
-  if (!tokenRes.ok) {
-    return page("Sign-in failed", "<h1>Sign-in failed</h1><p>Google rejected the authorization code.</p>", 502);
-  }
-
-  const { id_token } = (await tokenRes.json()) as { id_token?: string };
-  const claims = id_token ? readIdToken(id_token) : null;
-  const email = claims?.email?.toLowerCase();
-
-  const identityOk =
-    claims &&
-    email &&
-    claims.email_verified === true &&
-    claims.aud === env.GOOGLE_CLIENT_ID &&
-    GOOGLE_ISSUERS.includes(claims.iss ?? "") &&
-    typeof claims.exp === "number" &&
-    claims.exp * 1000 > Date.now();
-
-  if (!identityOk) {
-    return page("Sign-in failed", "<h1>Sign-in failed</h1><p>Google did not return a usable verified identity.</p>", 401);
-  }
-
-  // The one control that makes this a single-user server.
-  if (!allowedEmails(env).includes(email)) {
+  const result = await identityFromCode(env, code, callbackUrl(request));
+  if (!result.ok) {
+    if (result.reason === "exchange") {
+      return page("Sign-in failed", "<h1>Sign-in failed</h1><p>Google rejected the authorization code.</p>", 502);
+    }
+    if (result.reason === "identity") {
+      return page("Sign-in failed", "<h1>Sign-in failed</h1><p>Google did not return a usable verified identity.</p>", 401);
+    }
     return page(
       "Not authorized",
-      `<h1>Not authorized</h1><p><code>${escapeHtml(email)}</code> is not allowed to access this vault.</p>`,
+      `<h1>Not authorized</h1><p><code>${escapeHtml(result.email)}</code> is not allowed to access this vault.</p>`,
       403,
     );
   }
+  const { email, name } = result.identity;
 
   const client = await env.OAUTH_PROVIDER.lookupClient(state.req.clientId);
   const approval = await sign(env, {
     req: state.req,
     email,
-    name: claims.name,
+    name,
     iat: Date.now(),
   } satisfies ApprovalPayload);
 
@@ -306,7 +143,7 @@ async function handleApprove(request: Request, env: Env): Promise<Response> {
     return page("Expired", "<h1>Expired</h1><p>That approval sat too long. Start the connection again.</p>", 400);
   }
   // Re-check the allowlist: it may have been tightened since the page was rendered.
-  if (!allowedEmails(env).includes(approval.email)) {
+  if (!isAllowedEmail(env, approval.email)) {
     return page("Not authorized", "<h1>Not authorized</h1><p>That account is not allowed to access this vault.</p>", 403);
   }
 
