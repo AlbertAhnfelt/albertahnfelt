@@ -1,10 +1,6 @@
-@font-face {
-  font-family: 'Joan';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/Joan-Regular.woff2') format('woff2');
-}
+/* The @font-face lives in Layout.astro, not here: this file gets bundled into
+   each page's inline <style>, which ClientRouter swaps out on navigation. That
+   would re-register the font every time and flash the fallback for a frame. */
 
 :root {
   --brown: #261F19;

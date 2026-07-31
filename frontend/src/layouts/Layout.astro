@@ -27,6 +27,17 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={pageDescription} />
     <link rel="preload" as="font" type="font/woff2" href="/fonts/Joan-Regular.woff2" crossorigin>
+    <!-- Kept inline and persisted so ClientRouter never removes it mid-navigation;
+         re-registering the @font-face is what caused the fallback-font flash. -->
+    <style is:inline data-astro-transition-persist="font-face">
+      @font-face {
+        font-family: 'Joan';
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url('/fonts/Joan-Regular.woff2') format('woff2');
+      }
+    </style>
     <ClientRouter />
   </head>
   <body>
