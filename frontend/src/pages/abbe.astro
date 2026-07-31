@@ -249,22 +249,23 @@ import MoonCorner from '../components/MoonCorner.astro'
     grid-template-columns: 5rem 1fr;
     gap: 0 1.25rem;
     align-items: start;
-    margin-bottom: 1.6rem;
+    margin-bottom: 1.15rem;
   }
 
   @media (min-width: 768px) {
     .term :global(.line) {
       grid-template-columns: 5.5rem 1fr;
       gap: 0 1.5rem;
-      margin-bottom: 1.9rem;
+      margin-bottom: 1.3rem;
     }
   }
 
-  .term :global(.line.me) {
+  /* Only the name is coloured — the message itself stays white. */
+  .term :global(.line.me .who) {
     color: var(--me);
   }
 
-  .term :global(.line.abbe) {
+  .term :global(.line.abbe .who) {
     color: var(--abbe);
   }
 
