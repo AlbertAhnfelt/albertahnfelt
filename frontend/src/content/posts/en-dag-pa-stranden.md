@@ -1,6 +1,6 @@
 ---
 title: "En dag på stranden"
-date: 2026-09-25
+date: 2025-09-25
 description: "Strandsäsong"
 ---
 
