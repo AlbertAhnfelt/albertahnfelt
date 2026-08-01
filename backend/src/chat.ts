@@ -10,7 +10,13 @@
  * each turn and nothing is stored between requests.
  */
 
-import { GeminiError, DEFAULT_MODEL, generate, type Content, type Part } from "./gemini";
+import {
+  GeminiError,
+  DEFAULT_MODEL,
+  generateStream,
+  type Content,
+  type Part,
+} from "./gemini";
 import { loadInstructions } from "./vault";
 import { TOOLS, TOOLS_BY_NAME } from "./vault-tools";
 import { currentSession } from "./web-session";
@@ -99,7 +105,11 @@ async function runTool(
   }
 }
 
-export async function handleChat(request: Request, env: Cloudflare.Env): Promise<Response> {
+export async function handleChat(
+  request: Request,
+  env: Cloudflare.Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
   if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
   if (!sameOrigin(request, env)) return json({ error: "forbidden" }, 403);
   if (!request.headers.get("content-type")?.includes("application/json")) {
@@ -132,54 +142,85 @@ export async function handleChat(request: Request, env: Cloudflare.Env): Promise
     parameters: t.parameters,
   }));
 
-  try {
-    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-      const parts = await generate({
-        apiKey: env.GEMINI_API_KEY,
-        model: env.GEMINI_MODEL || DEFAULT_MODEL,
-        system,
-        contents,
-        tools: declarations,
-      });
+  // Everything above could still answer with a status code. From here the
+  // response is committed, so failures have to travel as a trailing line.
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encode = new TextEncoder();
+  const send = (event: Record<string, unknown>) =>
+    writer.write(encode.encode(`${JSON.stringify(event)}\n`));
 
-      const calls = parts.filter(
-        (p): p is Extract<Part, { functionCall: unknown }> => "functionCall" in p,
-      );
+  const pump = async () => {
+    try {
+      let answered = false;
 
-      if (calls.length === 0 || round === MAX_TOOL_ROUNDS) {
-        const reply = parts
-          .filter((p): p is { text: string } => "text" in p)
-          .map((p) => p.text)
-          .join("")
-          .trim();
-        if (reply) return json({ reply });
-        // Out of rounds, or a turn with neither text nor a call.
-        return json({ reply: "Jag kom inte fram till ett svar den här gången." });
+      for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+        const calls: { name: string; args?: Record<string, unknown> }[] = [];
+        // Kept verbatim, signatures and all, to be echoed back as the model's
+        // turn. Rebuilding these from name/args is a 400 on the next round.
+        const emitted: Part[] = [];
+
+        for await (const event of generateStream({
+          apiKey: env.GEMINI_API_KEY,
+          model: env.GEMINI_MODEL || DEFAULT_MODEL,
+          system,
+          contents,
+          tools: declarations,
+        })) {
+          emitted.push(event.part);
+
+          if (event.call) {
+            calls.push(event.call);
+            continue;
+          }
+          // Text from a round that turns out to be a tool round is withheld: a
+          // half-sentence written before a lookup tends to be contradicted by
+          // it. Once a call has appeared, this round is a tool round.
+          if (calls.length || !event.text) continue;
+
+          answered = true;
+          await send({ delta: event.text });
+        }
+
+        if (calls.length === 0) break;
+
+        // Echo the model's own turn back before the results, or the responses
+        // have nothing to attach to.
+        contents.push({ role: "model", parts: emitted });
+
+        const results = await Promise.all(
+          calls.map((call) => runTool(env.VAULT, call.name, call.args ?? {})),
+        );
+
+        contents.push({
+          role: "user",
+          parts: calls.map((call, i) => ({
+            functionResponse: { name: call.name, response: { output: results[i].output } },
+          })),
+        });
+
+        if (round === MAX_TOOL_ROUNDS) break;
       }
 
-      // Echo the model's own turn back before the results, or the next call has
-      // responses with nothing to attach them to.
-      contents.push({ role: "model", parts: calls });
-
-      const results = await Promise.all(
-        calls.map((call) => runTool(env.VAULT, call.functionCall.name, call.functionCall.args ?? ({} as Record<string, unknown>))),
-      );
-
-      contents.push({
-        role: "user",
-        parts: calls.map((call, i) => ({
-          functionResponse: {
-            name: call.functionCall.name,
-            response: { output: results[i].output },
-          },
-        })),
-      });
+      if (!answered) await send({ delta: "Jag kom inte fram till ett svar den här gången." });
+      await send({ done: true });
+    } catch (cause) {
+      // Message only — never the conversation, never the key.
+      console.error("chat failed:", cause instanceof GeminiError ? cause.message : "unexpected");
+      await send({ error: "chat failed" }).catch(() => {});
+    } finally {
+      // Always: a client that walks away must not leave the stream open.
+      await writer.close().catch(() => {});
     }
+  };
 
-    return json({ reply: "Jag kom inte fram till ett svar den här gången." });
-  } catch (cause) {
-    // Message only — never the conversation, never the key.
-    console.error("chat failed:", cause instanceof GeminiError ? cause.message : "unexpected");
-    return json({ error: "chat failed" }, 502);
-  }
+  ctx.waitUntil(pump());
+
+  return new Response(readable, {
+    headers: {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff",
+    },
+  });
 }

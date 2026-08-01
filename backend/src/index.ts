@@ -147,7 +147,7 @@ export default {
     // Routed here rather than inside handleWebSession so chat.ts can import the
     // session check from web-session.ts without the two importing each other.
     if (url.pathname === "/web/chat") {
-      return handleChat(request, env);
+      return handleChat(request, env, ctx);
     }
 
     if (url.pathname.startsWith("/web/")) {
