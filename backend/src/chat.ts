@@ -202,6 +202,23 @@ export async function handleChat(
         if (round === MAX_TOOL_ROUNDS) break;
       }
 
+      // Ran out of tool rounds without ever answering. Ask once more with the
+      // tools withdrawn, so the model has to speak from what it already has
+      // rather than leaving the turn empty.
+      if (!answered) {
+        for await (const event of generateStream({
+          apiKey: env.GEMINI_API_KEY,
+          model: env.GEMINI_MODEL || DEFAULT_MODEL,
+          system,
+          contents,
+          tools: [],
+        })) {
+          if (!event.text) continue;
+          answered = true;
+          await send({ delta: event.text });
+        }
+      }
+
       if (!answered) await send({ delta: "Jag kom inte fram till ett svar den här gången." });
       await send({ done: true });
     } catch (cause) {
