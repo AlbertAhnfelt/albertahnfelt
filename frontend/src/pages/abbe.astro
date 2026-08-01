@@ -51,13 +51,7 @@ import MoonCorner from '../components/MoonCorner.astro'
     }
   }
 
-  // Stand-ins until the Worker endpoint exists, so the flow can be felt.
-  const CANNED = [
-    'Inte kopplad till vaulten än — det här är ett attrappsvar.',
-    'Vore jag inkopplad hade jag läst hela sidan och svarat härifrån.',
-    'Sökningen routar bara till sidor. Ingen chunkning, inga embeddings.',
-    'Skrivningar går till en gren. Inget hamnar i main oläst.',
-  ]
+  type Turn = { role: 'user' | 'model'; text: string }
 
   const chat = (root: HTMLElement) => {
     const form = root.querySelector<HTMLFormElement>('[data-form]')
@@ -66,7 +60,9 @@ import MoonCorner from '../components/MoonCorner.astro'
     const log = root.querySelector<HTMLElement>('[data-log]')
     if (!form || !input || !mirror || !log) return
 
-    let turn = 0
+    // The Worker is stateless, so the page owns the conversation and posts it
+    // whole each turn. In memory only — nothing is persisted anywhere.
+    const history: Turn[] = []
     let pending = false
 
     const say = (role: 'me' | 'abbe', text: string) => {
@@ -85,6 +81,8 @@ import MoonCorner from '../components/MoonCorner.astro'
       line.append(who, body)
       log.append(line)
       form.scrollIntoView({ block: 'nearest' })
+      // Returned so a pending row can be rewritten in place once it answers.
+      return body
     }
 
     // The textarea's own text is transparent; this mirror is what you actually
@@ -94,24 +92,45 @@ import MoonCorner from '../components/MoonCorner.astro'
       mirror.textContent = input.value
     }
 
-    form.addEventListener('submit', (event) => {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault()
 
       const text = input.value.trim()
       if (!text || pending) return
 
       say('me', text)
+      history.push({ role: 'user', text })
       input.value = ''
       sync()
 
-      // No backend yet. The real reply has to come from a cookie-authenticated
-      // Worker endpoint that re-checks the session — never from this page.
       pending = true
-      window.setTimeout(() => {
-        say('abbe', CANNED[turn % CANNED.length])
-        turn += 1
+      const row = say('abbe', '(thinking)')
+
+      try {
+        // Same-origin, so the HttpOnly session cookie rides along and the
+        // Worker re-checks it. The vault is only ever touched over there.
+        const res = await fetch('/api/abbe/web/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ messages: history }),
+        })
+        if (!res.ok) throw new Error(String(res.status))
+
+        const { reply } = (await res.json()) as { reply?: string }
+        if (!reply) throw new Error('empty')
+
+        // textContent, never innerHTML: this is vault text via a model.
+        row.textContent = reply
+        history.push({ role: 'model', text: reply })
+      } catch {
+        row.textContent = '(något gick fel)'
+        // The exchange never happened, so keep it out of the context sent next.
+        history.pop()
+      } finally {
         pending = false
-      }, 450)
+        form.scrollIntoView({ block: 'nearest' })
+        input.focus()
+      }
     })
 
     input.addEventListener('input', sync)

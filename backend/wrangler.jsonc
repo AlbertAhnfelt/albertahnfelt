@@ -28,11 +28,14 @@
     // session cookie's Path are built from them, and behind the proxy the
     // inbound Host is the workers.dev name.
     "SITE_ORIGIN": "https://www.albertahnfelt.com",
-    "API_BASE_PATH": "/api/abbe"
+    "API_BASE_PATH": "/api/abbe",
+    // Which model answers on the website. Swap here, no code change.
+    "GEMINI_MODEL": "gemini-2.5-flash"
   },
   "observability": { "enabled": true }
   // Secrets (set via `wrangler secret put`, never here):
   //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET — Google OAuth app credentials
   //   ALLOWED_EMAILS — comma-separated allowlist of Google accounts
   //   MCP_AUTH_TOKEN — static bearer token for headless agents (bypasses OAuth)
+  //   GEMINI_API_KEY — Google AI Studio key, used only by /web/chat
 }

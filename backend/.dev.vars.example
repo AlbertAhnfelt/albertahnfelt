@@ -20,3 +20,6 @@ MCP_AUTH_TOKEN=dev-only-token
 # redirect URI on the Google OAuth client for a local login to complete.
 # SITE_ORIGIN=http://localhost:4321
 # API_BASE_PATH=/api/abbe
+
+# Google AI Studio key for the website chat (/web/chat)
+GEMINI_API_KEY=
