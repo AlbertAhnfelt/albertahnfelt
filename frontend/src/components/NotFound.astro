@@ -1,0 +1,42 @@
+---
+import Moon from './Moon.svelte'
+import { clickyMode } from '../config'
+
+// The 404 body: just the moon, on its own, linking home. Shared by the real 404
+// page and by /abbe's unauthorized state, so the two cannot drift apart into
+// telling you which one you hit.
+//
+// `persist` carries the moon across view transitions. Only one element per page
+// may claim the "moon" key, so /abbe — whose signed-in block already has a
+// persisted moon of its own — opts out.
+const { persist = true } = Astro.props
+---
+<main>
+  <a class="moon" href="/">
+    {persist
+      ? <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
+      : <Moon clicky={clickyMode} client:load></Moon>}
+  </a>
+</main>
+
+<style>
+  main {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .moon {
+    display: block;
+    width: 8rem;
+    height: 8rem;
+  }
+
+  @media (min-width: 768px) {
+    .moon {
+      width: 12rem;
+      height: 12rem;
+    }
+  }
+</style>

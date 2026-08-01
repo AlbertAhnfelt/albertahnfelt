@@ -1,34 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro'
-import Moon from '../components/Moon.svelte'
-import { clickyMode } from '../config'
+import NotFound from '../components/NotFound.astro'
 ---
 <Layout title="404">
-  <main>
-    <a class="moon" href="/">
-      <Moon clicky={clickyMode} client:load transition:persist="moon"></Moon>
-    </a>
-  </main>
+  <NotFound />
 </Layout>
-
-<style>
-  main {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .moon {
-    display: block;
-    width: 8rem;
-    height: 8rem;
-  }
-
-  @media (min-width: 768px) {
-    .moon {
-      width: 12rem;
-      height: 12rem;
-    }
-  }
-</style>

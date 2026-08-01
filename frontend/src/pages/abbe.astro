@@ -2,53 +2,73 @@
 import Layout from '../layouts/Layout.astro'
 import BackArrow from '../components/BackArrow.astro'
 import MoonCorner from '../components/MoonCorner.astro'
+import NotFound from '../components/NotFound.astro'
 
 // Placeholder for the Abbe interface. Everything below is static public HTML —
 // signed-in state only decides which block is shown. When this page starts
 // showing vault content it has to come from a cookie-authenticated Worker
 // endpoint, never from anything baked in at build time.
+//
+// Anyone who is not signed in gets the site's ordinary 404 and nothing else: no
+// notice, no login link, nothing that names Abbe. That is presentation only —
+// every real check lives in the Worker, which re-validates the session cookie
+// against the allowlist on every request. Signing in is done by going straight
+// to /api/abbe/web/login?returnTo=/abbe.
 ---
 
-<Layout title="Abbe">
-  <main>
-    <BackArrow href="/" label="Till startsidan" variant="corner" />
-
-    <div class="content">
-      <section class="abbe" data-abbe>
-        <p data-state="loading">…</p>
-
-        <div data-state="out" hidden>
-          <p>Den här sidan är inte för allmänheten.</p>
-          <p>
-            <a class="login" href="/api/abbe/web/login?returnTo=/abbe">logga in</a>
-          </p>
-        </div>
-
-        <div class="term" data-state="in" hidden>
-          <h1>Abbe.</h1>
-
-          <div data-log></div>
-
-          <form class="line me" data-form>
-            <span class="who">Albert</span>
-            <div class="field">
-              <div class="mirror"><span data-mirror></span><span class="cursor"></span></div>
-              <textarea data-input rows="1" autocomplete="off" spellcheck="false"></textarea>
-            </div>
-          </form>
-        </div>
-      </section>
+<!-- Titled 404, not Abbe: the static HTML every visitor gets should read as the
+     404 it will be for almost all of them. The script relabels the tab once the
+     session checks out. -->
+<Layout title="404">
+  <div data-abbe>
+    <!-- Both states ship in the HTML and both start hidden, so nothing is
+         painted until /web/me has answered one way or the other. -->
+    <div data-state="out" hidden>
+      <NotFound persist={false} />
     </div>
 
-    <MoonCorner variant="bottom-center" />
-  </main>
+    <main data-state="in" hidden>
+      <BackArrow href="/" label="Till startsidan" variant="corner" />
+
+      <div class="content">
+        <section class="abbe">
+          <div class="term">
+            <h1>Abbe.</h1>
+
+            <div data-log></div>
+
+            <form class="line me" data-form>
+              <span class="who">Albert</span>
+              <div class="field">
+                <div class="mirror"><span data-mirror></span><span class="cursor"></span></div>
+                <textarea data-input rows="1" autocomplete="off" spellcheck="false"></textarea>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+
+      <MoonCorner variant="bottom-center" />
+    </main>
+  </div>
 </Layout>
 
 <script>
-  const show = (root: HTMLElement, state: 'loading' | 'out' | 'in') => {
+  const show = (root: HTMLElement, state: 'out' | 'in') => {
     for (const block of root.querySelectorAll<HTMLElement>('[data-state]')) {
       block.hidden = block.dataset.state !== state
     }
+  }
+
+  /**
+   * The page ships as a 404 — title included — and only becomes Abbe once the
+   * session is confirmed. That way there is no moment where the tab says "Abbe"
+   * to someone who is not signed in. Built the way Layout.astro builds it.
+   */
+  const signedIn = (root: HTMLElement) => {
+    show(root, 'in')
+    document.title = 'Abbe — Albert Ahnfelt'
+    chat(root)
   }
 
   type Turn = { role: 'user' | 'model'; text: string }
@@ -114,13 +134,37 @@ import MoonCorner from '../components/MoonCorner.astro'
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ messages: history }),
         })
-        if (!res.ok) throw new Error(String(res.status))
+        if (!res.ok || !res.body) throw new Error(String(res.status))
 
-        const { reply } = (await res.json()) as { reply?: string }
+        // NDJSON: one JSON object per line, so a line split across two network
+        // chunks has to be held back until its newline arrives.
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let reply = ''
+
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            const event = JSON.parse(line) as { delta?: string; done?: boolean; error?: string }
+            if (event.error) throw new Error(event.error)
+            if (event.delta === undefined) continue
+
+            reply += event.delta
+            // textContent, never innerHTML: this is vault text via a model.
+            row.textContent = reply
+            form.scrollIntoView({ block: 'nearest' })
+          }
+        }
+
         if (!reply) throw new Error('empty')
-
-        // textContent, never innerHTML: this is vault text via a model.
-        row.textContent = reply
         history.push({ role: 'model', text: reply })
       } catch {
         row.textContent = '(något gick fel)'
@@ -159,8 +203,7 @@ import MoonCorner from '../components/MoonCorner.astro'
     // chat shell be looked at without a working Google login locally. It shows
     // an empty UI — there is still no vault content on this page to leak.
     if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview')) {
-      show(root, 'in')
-      chat(root)
+      signedIn(root)
       return
     }
 
@@ -168,8 +211,7 @@ import MoonCorner from '../components/MoonCorner.astro'
       const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
       if (!res.ok) return show(root, 'out')
 
-      show(root, 'in')
-      chat(root)
+      signedIn(root)
     } catch {
       show(root, 'out')
     }
@@ -185,8 +227,10 @@ import MoonCorner from '../components/MoonCorner.astro'
 
 <style>
   /* Flex column so the moon's `margin-top: auto` can push it to the bottom of
-     a short page, and get pushed down by a long conversation instead. */
-  main {
+     a short page, and get pushed down by a long conversation instead.
+     :not([hidden]) because an author `display` rule would otherwise beat the
+     `hidden` attribute, and this <main> is only shown once signed in. */
+  main:not([hidden]) {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -215,26 +259,6 @@ import MoonCorner from '../components/MoonCorner.astro'
       margin-top: 6rem;
       font-size: 1.05rem;
     }
-  }
-
-  [data-state='out'] p {
-    margin-bottom: 1.2rem;
-  }
-
-  [data-state='out'] p:last-child {
-    margin-bottom: 0;
-  }
-
-  .login {
-    text-shadow: 0.12rem 0 0 var(--black);
-    transition: transform 0.15s ease, text-shadow 0.15s ease;
-    display: inline-block;
-  }
-
-  .login:hover,
-  .login.clicky-hover {
-    text-shadow: 0 0 0 transparent;
-    transform: translateX(0.4rem);
   }
 
   .term {
