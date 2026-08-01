@@ -2,7 +2,6 @@ export const inspiration = [
   { label: 'meta inspiration', url: 'https://www.nourishedbytime.com/history' },
   { label: 'Czerial', url: 'https://rateyourmusic.com/~Czerial' },
   { label: 'What makes a good hobby?', url: 'https://www.axelbacklund.se/insights/hobbies' },
-  { label: 'Ring Olof Palme', url: 'https://ringolofpal.me/' },
   { label: 'Liang Wenfeng', url: 'https://en.wikipedia.org/wiki/Liang_Wenfeng' },
   { label: 'The Last Day of High School', url: 'https://www.youtube.com/watch?v=OZ_Bu4dfeMs' },
   { label: 'Interview with Obsidian enthusiast 2026', url: 'https://www.youtube.com/watch?v=NSTT2iBSwZs' },

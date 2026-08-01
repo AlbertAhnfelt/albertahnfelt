@@ -22,6 +22,19 @@ const { variant = 'bottom' } = Astro.props
     padding: 3rem 0 2rem;
   }
 
+  /* Sticky footer, for pages whose content grows downward. Stays in flow, so
+     it can never overlap. `margin-top: auto` eats the leftover space in a
+     flex-column parent — the moon rests at the bottom of a short page, and
+     collapses to zero once the content is tall enough to push it down. The
+     padding-top is the guaranteed minimum gap above it. */
+  .stack.bottom-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: auto;
+    padding: 6rem 0 2rem;
+  }
+
   .stack.top {
     position: absolute;
     top: 1rem;
@@ -34,7 +47,8 @@ const { variant = 'bottom' } = Astro.props
   }
 
   .stack.bottom .moon,
-  .stack.center .moon {
+  .stack.center .moon,
+  .stack.bottom-center .moon {
     position: relative;
     left: auto;
     width: 8rem;
@@ -79,13 +93,15 @@ const { variant = 'bottom' } = Astro.props
       margin-bottom: 0.5rem;
     }
 
-    .stack.center .moon {
+    .stack.center .moon,
+    .stack.bottom-center .moon {
       width: 12rem;
       height: 12rem;
     }
 
     .stack.bottom .title,
-    .stack.center .title {
+    .stack.center .title,
+    .stack.bottom-center .title {
       font-size: 2rem;
     }
 
