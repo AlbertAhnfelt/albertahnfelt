@@ -30,7 +30,7 @@
     "SITE_ORIGIN": "https://www.albertahnfelt.com",
     "API_BASE_PATH": "/api/abbe",
     // Which model answers on the website. Swap here, no code change.
-    "GEMINI_MODEL": "gemini-2.5-flash"
+    "GEMINI_MODEL": "gemini-3.6-flash"
   },
   "observability": { "enabled": true }
   // Secrets (set via `wrangler secret put`, never here):

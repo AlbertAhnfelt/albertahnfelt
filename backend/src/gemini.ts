@@ -8,7 +8,7 @@
 
 const ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models";
 
-export const DEFAULT_MODEL = "gemini-2.5-flash";
+export const DEFAULT_MODEL = "gemini-3.6-flash";
 
 const TIMEOUT_MS = 60_000;
 
