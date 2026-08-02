@@ -4,6 +4,7 @@ import { McpAgent } from "agents/mcp";
 import { isAuthorized } from "./auth";
 import { handleChat } from "./chat";
 import googleHandler, { type GrantProps } from "./oauth-google";
+import { handleVault } from "./web-vault";
 import { handleWebSession } from "./web-session";
 import { FALLBACK_INSTRUCTIONS, loadInstructions } from "./vault";
 import { TOOLS } from "./vault-tools";
@@ -148,6 +149,10 @@ export default {
     // session check from web-session.ts without the two importing each other.
     if (url.pathname === "/web/chat") {
       return handleChat(request, env, ctx);
+    }
+
+    if (url.pathname.startsWith("/web/vault/")) {
+      return handleVault(request, env);
     }
 
     if (url.pathname.startsWith("/web/")) {

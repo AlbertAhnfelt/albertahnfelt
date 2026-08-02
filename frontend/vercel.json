@@ -4,6 +4,10 @@
     {
       "source": "/api/abbe/web/:path*",
       "destination": "https://abbe.albert-ahnfelt.workers.dev/web/:path*"
+    },
+    {
+      "source": "/vault/:path*",
+      "destination": "/vault"
     }
   ]
 }

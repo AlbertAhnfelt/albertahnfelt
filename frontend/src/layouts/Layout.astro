@@ -9,7 +9,11 @@ const DEFAULT_DESCRIPTION = 'Albert Ahnfelts sajt.'
 // The rendered <title> is always the signed-out one — that is what ships in the
 // static HTML, what crawlers read, and what a stranger's tab says. The signed-in
 // title is carried separately and only ever applied by the script below.
-const { title, description, authTitle } = Astro.props
+// `noindex` is for the private surfaces. It keeps them out of search results and,
+// more usefully, stops a path like /vault/human/Jobb/lön.md from riding out in a
+// Referer header on an outbound click — the path names a note even though the
+// note itself never leaves the Worker.
+const { title, description, authTitle, noindex = false } = Astro.props
 const pageTitle = title ? `${title} — ${SITE_NAME}` : SITE_NAME
 const pageDescription = description ?? DEFAULT_DESCRIPTION
 const signedInTitle = authTitle ? `${authTitle} — ${SITE_NAME}` : null
@@ -23,6 +27,8 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
     <link rel="canonical" href={canonicalURL} />
     <title>{pageTitle}</title>
     {signedInTitle && <meta name="auth-title" content={signedInTitle} />}
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
+    {noindex && <meta name="referrer" content="no-referrer" />}
     <!-- Blocking, and in the head on purpose. The signed-in state of this site
          used to be decided by a fetch to the Worker, which meant an auth-aware
          page painted nothing at all until a network round trip came back — the

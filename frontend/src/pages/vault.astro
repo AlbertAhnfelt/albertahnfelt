@@ -1,0 +1,545 @@
+---
+import Layout from '../layouts/Layout.astro'
+import BackArrow from '../components/BackArrow.astro'
+import MoonCorner from '../components/MoonCorner.astro'
+import NotFound from '../components/NotFound.astro'
+
+// A read-only reader for the Obsidian vault. Same shape as /abbe: this file is
+// public static HTML and contains no vault content whatsoever — the build never
+// touches R2. Every note, every title, every byte arrives at runtime from a
+// Worker endpoint that re-validates the session cookie on each request.
+//
+// One page serves both the index and a single note; which one is decided from
+// location.pathname. /vault/:path* is rewritten here by vercel.json (and by the
+// dev middleware in astro.config.mjs), because these paths cannot be
+// prerendered — knowing them at build time would mean knowing the vault.
+---
+
+<Layout title="404" authTitle="Vault" noindex>
+  <div data-vault>
+    <div data-state="out">
+      <NotFound persist={false} />
+    </div>
+
+    <main data-state="in">
+      <BackArrow href="/" label="Till startsidan" variant="corner" />
+
+      <div class="content">
+        <section class="vault">
+          <!-- The index. -->
+          <div data-view="list" hidden>
+            <h1>Vault.</h1>
+
+            <input
+              class="filter"
+              data-filter
+              type="search"
+              placeholder="sök titel…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+
+            <p class="empty" data-empty hidden>Inga träffar.</p>
+            <div data-list></div>
+          </div>
+
+          <!-- A single note. -->
+          <article data-view="note" hidden>
+            <a class="up" href="/vault">← vault</a>
+            <h1 data-title></h1>
+            <dl class="props" data-props hidden></dl>
+            <div class="body" data-body></div>
+          </article>
+
+          <p class="status" data-status hidden></p>
+        </section>
+      </div>
+
+      <MoonCorner variant="bottom-center" />
+    </main>
+  </div>
+</Layout>
+
+<script>
+  type Page = { path: string; title: string; folder: string }
+  type Note = {
+    path: string
+    title: string
+    frontmatter: { key: string; value: string }[]
+    html: string
+  }
+
+  const API = '/api/abbe/web/vault'
+
+  const show = (state: 'out' | 'in') => {
+    document.documentElement.dataset.session = state
+  }
+
+  /**
+   * The page ships as a 404, title included, so the tab never says "Vault" to
+   * someone who is not signed in. Both names live in the head — see Layout.
+   */
+  const title = (state: 'out' | 'in') => {
+    const root = document.documentElement
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="auth-title"]')
+
+    if (state === 'in') {
+      if (!meta || document.title === meta.content) return
+      root.dataset.publicTitle = document.title
+      document.title = meta.content
+    } else if (root.dataset.publicTitle) {
+      document.title = root.dataset.publicTitle
+    }
+  }
+
+  /** The note path this URL asks for, or null for the index. */
+  const pathFromUrl = (): string | null => {
+    const rest = decodeURIComponent(window.location.pathname).replace(/^\/vault\/?/, '')
+    return rest ? rest : null
+  }
+
+  const vault = (root: HTMLElement) => {
+    // Resolve runs twice on a normal load — once on the hint, once when /web/me
+    // confirms — so wiring must happen only on the first pass.
+    if (root.dataset.wired) return
+    root.dataset.wired = '1'
+
+    const views = {
+      list: root.querySelector<HTMLElement>('[data-view="list"]')!,
+      note: root.querySelector<HTMLElement>('[data-view="note"]')!,
+    }
+    const filter = root.querySelector<HTMLInputElement>('[data-filter]')!
+    const listEl = root.querySelector<HTMLElement>('[data-list]')!
+    const emptyEl = root.querySelector<HTMLElement>('[data-empty]')!
+    const statusEl = root.querySelector<HTMLElement>('[data-status]')!
+    const titleEl = root.querySelector<HTMLElement>('[data-title]')!
+    const propsEl = root.querySelector<HTMLElement>('[data-props]')!
+    const bodyEl = root.querySelector<HTMLElement>('[data-body]')!
+
+    let pages: Page[] | null = null
+
+    const status = (message: string | null) => {
+      statusEl.textContent = message ?? ''
+      statusEl.hidden = !message
+    }
+
+    const view = (which: 'list' | 'note' | null) => {
+      views.list.hidden = which !== 'list'
+      views.note.hidden = which !== 'note'
+    }
+
+    /* ------------------------------------------------------------- index */
+
+    const renderList = (query: string) => {
+      const q = query.trim().toLowerCase()
+      // Title only, as asked — the path comes along so folder names still find
+      // things, which costs nothing and is what you reach for in practice.
+      const hits = (pages ?? []).filter(
+        (p) => !q || p.title.toLowerCase().includes(q) || p.folder.toLowerCase().includes(q),
+      )
+
+      listEl.replaceChildren()
+      emptyEl.hidden = hits.length > 0
+
+      let folder: string | null = null
+      for (const page of hits) {
+        if (page.folder !== folder) {
+          folder = page.folder
+          const heading = document.createElement('h2')
+          heading.className = 'folder'
+          heading.textContent = folder
+          listEl.append(heading)
+        }
+
+        const link = document.createElement('a')
+        link.className = 'entry'
+        link.href = `/vault/${page.path.split('/').map(encodeURIComponent).join('/')}`
+        // textContent, never innerHTML: a filename is vault-derived text.
+        link.textContent = page.title
+        listEl.append(link)
+      }
+    }
+
+    const loadList = async () => {
+      if (pages) return true
+      status('läser vaulten…')
+      try {
+        const res = await fetch(`${API}/pages`, { headers: { accept: 'application/json' } })
+        if (!res.ok) throw new Error(String(res.status))
+        pages = ((await res.json()) as { pages: Page[] }).pages
+        status(null)
+        return true
+      } catch {
+        status('kunde inte läsa vaulten.')
+        return false
+      }
+    }
+
+    /* -------------------------------------------------------------- note */
+
+    const renderNote = (note: Note) => {
+      titleEl.textContent = note.title
+
+      propsEl.replaceChildren()
+      propsEl.hidden = note.frontmatter.length === 0
+      for (const { key, value } of note.frontmatter) {
+        const dt = document.createElement('dt')
+        dt.textContent = key
+        const dd = document.createElement('dd')
+        dd.textContent = value
+        propsEl.append(dt, dd)
+      }
+
+      // The one innerHTML in this codebase. The Worker builds this string with a
+      // renderer that can only emit a fixed set of tags and drops author markup
+      // outright — see backend/src/markdown.ts. Nothing else here relaxes the
+      // textContent rule.
+      bodyEl.innerHTML = note.html
+      window.scrollTo(0, 0)
+    }
+
+    const loadNote = async (path: string) => {
+      status('öppnar…')
+      try {
+        const res = await fetch(`${API}/page?path=${encodeURIComponent(path)}`, {
+          headers: { accept: 'application/json' },
+        })
+        if (!res.ok) throw new Error(String(res.status))
+        renderNote((await res.json()) as Note)
+        status(null)
+        view('note')
+      } catch {
+        view(null)
+        status('hittade inte sidan.')
+      }
+    }
+
+    /* ------------------------------------------------------------ routing */
+
+    const route = async () => {
+      const path = pathFromUrl()
+
+      if (!path) {
+        view('list')
+        if (await loadList()) renderList(filter.value)
+        return
+      }
+
+      // Loaded in the background so a filter is instant after going back.
+      void loadList()
+      await loadNote(path)
+    }
+
+    // Internal links are handled here rather than by the browser: a full
+    // navigation would re-run auth and re-fetch the index for every wikilink.
+    root.addEventListener('click', (event) => {
+      const link = (event.target as HTMLElement | null)?.closest?.('a')
+      if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+
+      const href = link.getAttribute('href') ?? ''
+      if (!href.startsWith('/vault')) return
+
+      event.preventDefault()
+      if (href === window.location.pathname) return
+      window.history.pushState({}, '', href)
+      void route()
+    })
+
+    window.addEventListener('popstate', () => void route())
+    filter.addEventListener('input', () => renderList(filter.value))
+
+    void route()
+  }
+
+  const signedIn = (root: HTMLElement) => {
+    show('in')
+    title('in')
+    vault(root)
+  }
+
+  const signedOut = () => {
+    show('out')
+    title('out')
+  }
+
+  const resolve = async (root: HTMLElement) => {
+    if (root.dataset.ready) return
+    root.dataset.ready = '1'
+
+    // Dev only, and dead-code-eliminated from the production bundle.
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview')) {
+      signedIn(root)
+      return
+    }
+
+    // The head script has already painted from the hint cookie; taking it at its
+    // word here is what makes the page usable immediately rather than a round
+    // trip from now.
+    if (document.documentElement.dataset.session === 'in') signedIn(root)
+
+    try {
+      const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
+      if (!res.ok) return signedOut()
+      signedIn(root)
+    } catch {
+      // Offline, or the Worker is down. Whatever is on screen stays — a dropped
+      // request is not evidence about the session, and there is nothing on this
+      // page to protect. The endpoints do their own checking.
+    }
+  }
+
+  const run = () => {
+    for (const root of document.querySelectorAll<HTMLElement>('[data-vault]')) resolve(root)
+  }
+
+  run()
+  document.addEventListener('astro:page-load', run)
+</script>
+
+<style>
+  /* Neither state shows until <html> has been told which one is real, so a
+     browser with JavaScript off sees nothing at all. :global() on the <html>
+     half because Astro's scoping would otherwise demand this component's
+     attribute on the root element, which never has it. */
+  [data-state] {
+    display: none;
+  }
+
+  :global(html[data-session='out']) [data-state='out'] {
+    display: block;
+  }
+
+  :global(html[data-session='in']) [data-state='in'] {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .content {
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1.5rem 0;
+  }
+
+  .vault {
+    width: 100%;
+    max-width: 36rem;
+    margin-top: 4rem;
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+
+  @media (min-width: 768px) {
+    .content {
+      padding: 3vh 1.5rem 0;
+    }
+
+    .vault {
+      margin-top: 6rem;
+      font-size: 1.05rem;
+    }
+  }
+
+  h1 {
+    font-size: 2.4rem;
+    line-height: 1.2;
+    margin-bottom: 1.5rem;
+  }
+
+  @media (min-width: 768px) {
+    h1 {
+      font-size: 3rem;
+    }
+  }
+
+  /* ------------------------------------------------------------- index */
+
+  .filter {
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    border-bottom: 1px solid rgba(239, 237, 234, 0.25);
+    border-radius: 0;
+    padding: 0 0 0.6rem;
+    margin-bottom: 2rem;
+  }
+
+  .filter:focus {
+    outline: none;
+    border-bottom-color: var(--white);
+  }
+
+  .filter::placeholder {
+    color: inherit;
+    opacity: 0.4;
+  }
+
+  .folder {
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+    opacity: 0.45;
+    margin: 1.8rem 0 0.5rem;
+  }
+
+  .folder:first-child {
+    margin-top: 0;
+  }
+
+  .entry {
+    display: block;
+    padding: 0.15rem 0;
+  }
+
+  .entry:hover {
+    text-decoration: underline;
+  }
+
+  .status,
+  .empty {
+    opacity: 0.5;
+    margin-top: 1rem;
+  }
+
+  .up {
+    display: inline-block;
+    font-size: 0.85rem;
+    opacity: 0.5;
+    margin-bottom: 2rem;
+  }
+
+  .up:hover {
+    opacity: 1;
+  }
+
+  /* -------------------------------------------- frontmatter, Obsidian-ish */
+
+  .props {
+    display: grid;
+    grid-template-columns: minmax(5rem, auto) 1fr;
+    gap: 0.2rem 1rem;
+    font-size: 0.85rem;
+    margin: 0 0 2rem;
+    padding-bottom: 1.2rem;
+    border-bottom: 1px solid rgba(239, 237, 234, 0.15);
+  }
+
+  .props dt {
+    opacity: 0.45;
+  }
+
+  .props dd {
+    margin: 0;
+    opacity: 0.8;
+    overflow-wrap: anywhere;
+  }
+
+  /* ---------------------------------------------------------- note body */
+
+  /* All :global(): this markup is inserted at runtime and never carries
+     Astro's scope attribute. Anchored to .body so nothing leaks out. */
+  .body {
+    margin-bottom: 4rem;
+  }
+
+  .body :global(h1) {
+    font-size: 1.8rem;
+    line-height: 1.2;
+    margin: 2.4rem 0 0.8rem;
+  }
+
+  .body :global(h2) {
+    font-size: 1.5rem;
+    line-height: 1.3;
+    margin: 2rem 0 0.8rem;
+  }
+
+  .body :global(h3) {
+    font-size: 1.25rem;
+    margin: 1.6rem 0 0.6rem;
+  }
+
+  .body :global(h4),
+  .body :global(h5),
+  .body :global(h6) {
+    font-size: 1.05rem;
+    margin: 1.4rem 0 0.5rem;
+    opacity: 0.85;
+  }
+
+  .body :global(p) {
+    margin-bottom: 1.2rem;
+  }
+
+  .body :global(a) {
+    text-decoration: underline;
+  }
+
+  .body :global(ul),
+  .body :global(ol) {
+    margin: 0 0 1.2rem 1.4rem;
+  }
+
+  .body :global(li) {
+    margin-bottom: 0.3rem;
+  }
+
+  .body :global(blockquote) {
+    margin: 0 0 1.2rem;
+    padding-left: 1rem;
+    border-left: 0.2rem solid var(--white);
+    font-style: italic;
+  }
+
+  .body :global(hr) {
+    border: 0;
+    border-top: 1px solid rgba(239, 237, 234, 0.2);
+    margin: 2rem 0;
+  }
+
+  .body :global(code) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    background: rgba(239, 237, 234, 0.08);
+    padding: 0.1em 0.35em;
+    border-radius: 0.2rem;
+  }
+
+  .body :global(pre) {
+    overflow-x: auto;
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.9rem 1rem;
+    border-radius: 0.3rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .body :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+
+  .body :global(img) {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 1.5rem 0;
+  }
+
+  /* Tables can be wider than the column; let them scroll rather than push the
+     page sideways. */
+  .body :global(table) {
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin-bottom: 1.2rem;
+    font-size: 0.95em;
+  }
+
+  .body :global(th),
+  .body :global(td) {
+    border: 1px solid rgba(239, 237, 234, 0.2);
+    padding: 0.4rem 0.7rem;
+    text-align: left;
+  }
+</style>

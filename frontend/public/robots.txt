@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /abbe
+Disallow: /vault
 Disallow: /api/
 
 Sitemap: https://albertahnfelt.com/sitemap-index.xml
