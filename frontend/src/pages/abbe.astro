@@ -17,17 +17,19 @@ import NotFound from '../components/NotFound.astro'
 ---
 
 <!-- Titled 404, not Abbe: the static HTML every visitor gets should read as the
-     404 it will be for almost all of them. The script relabels the tab once the
-     session checks out. -->
-<Layout title="404">
+     404 it will be for almost all of them. `authTitle` is the tab's other name,
+     applied only once the session is believed to be real. -->
+<Layout title="404" authTitle="Abbe">
   <div data-abbe>
-    <!-- Both states ship in the HTML and both start hidden, so nothing is
-         painted until /web/me has answered one way or the other. -->
-    <div data-state="out" hidden>
+    <!-- Both states ship in the HTML, and CSS shows exactly one, keyed off the
+         flag Layout's head script stamps on <html> before the first paint.
+         Neither is shown until that flag is set, so there is no frame with both
+         and none where the page sits empty waiting on the network. -->
+    <div data-state="out">
       <NotFound persist={false} />
     </div>
 
-    <main data-state="in" hidden>
+    <main data-state="in">
       <BackArrow href="/" label="Till startsidan" variant="corner" />
 
       <div class="content">
@@ -54,26 +56,52 @@ import NotFound from '../components/NotFound.astro'
 </Layout>
 
 <script>
-  const show = (root: HTMLElement, state: 'out' | 'in') => {
-    for (const block of root.querySelectorAll<HTMLElement>('[data-state]')) {
-      block.hidden = block.dataset.state !== state
-    }
+  /**
+   * Which block is real. One flag on <html>, set here and by Layout's head
+   * script, with CSS doing the showing — so the same switch works before this
+   * bundle has even been fetched.
+   */
+  const show = (state: 'out' | 'in') => {
+    document.documentElement.dataset.session = state
   }
 
   /**
-   * The page ships as a 404 — title included — and only becomes Abbe once the
-   * session is confirmed. That way there is no moment where the tab says "Abbe"
-   * to someone who is not signed in. Built the way Layout.astro builds it.
+   * The page ships as a 404, title included, so there is no moment where the tab
+   * says "Abbe" to someone who is not signed in. Both names come from the head
+   * (see Layout.astro), which is the only place either is spelled out.
    */
+  const title = (state: 'out' | 'in') => {
+    const root = document.documentElement
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="auth-title"]')
+
+    if (state === 'in') {
+      if (!meta || document.title === meta.content) return
+      root.dataset.publicTitle = document.title
+      document.title = meta.content
+    } else if (root.dataset.publicTitle) {
+      document.title = root.dataset.publicTitle
+    }
+  }
+
   const signedIn = (root: HTMLElement) => {
-    show(root, 'in')
-    document.title = 'Abbe — Albert Ahnfelt'
+    show('in')
+    title('in')
     chat(root)
+  }
+
+  const signedOut = () => {
+    show('out')
+    title('out')
   }
 
   type Turn = { role: 'user' | 'model'; text: string }
 
   const chat = (root: HTMLElement) => {
+    // signedIn() runs twice on a normal load — once on the hint, once when
+    // /web/me confirms it — and the second pass must not double the listeners.
+    if (root.dataset.chat) return
+    root.dataset.chat = '1'
+
     const form = root.querySelector<HTMLFormElement>('[data-form]')
     const input = root.querySelector<HTMLTextAreaElement>('[data-input]')
     const mirror = root.querySelector<HTMLElement>('[data-mirror]')
@@ -207,13 +235,24 @@ import NotFound from '../components/NotFound.astro'
       return
     }
 
+    // The head script has already painted from the hint cookie. Taking it at its
+    // word here too is what makes the page usable immediately: the prompt is
+    // wired up and focused now, rather than a round trip from now.
+    if (document.documentElement.dataset.session === 'in') signedIn(root)
+
     try {
+      // The authority, and the only thing that gets to be the last word. The
+      // Worker deletes a stale hint on its way out of this call, so a session
+      // that has been revoked cannot keep painting itself back in.
       const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
-      if (!res.ok) return show(root, 'out')
+      if (!res.ok) return signedOut()
 
       signedIn(root)
     } catch {
-      show(root, 'out')
+      // Offline, or the Worker is down. Whatever is on screen stays: a dropped
+      // request is not evidence about the session, and there is nothing on this
+      // page to protect — the chat endpoint does its own checking, and will
+      // fail the same way this did.
     }
   }
 
@@ -226,11 +265,22 @@ import NotFound from '../components/NotFound.astro'
 </script>
 
 <style>
+  /* Neither state shows until <html> has been told which one is real, so a
+     browser with JavaScript off sees the same nothing it saw when both blocks
+     were `hidden`. :global() on the <html> half because Astro's scoping would
+     otherwise demand this component's attribute on the root element, which
+     never has it. */
+  [data-state] {
+    display: none;
+  }
+
+  :global(html[data-session='out']) [data-state='out'] {
+    display: block;
+  }
+
   /* Flex column so the moon's `margin-top: auto` can push it to the bottom of
-     a short page, and get pushed down by a long conversation instead.
-     :not([hidden]) because an author `display` rule would otherwise beat the
-     `hidden` attribute, and this <main> is only shown once signed in. */
-  main:not([hidden]) {
+     a short page, and get pushed down by a long conversation instead. */
+  :global(html[data-session='in']) [data-state='in'] {
     min-height: 100vh;
     display: flex;
     flex-direction: column;

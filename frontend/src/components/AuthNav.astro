@@ -1,7 +1,8 @@
 ---
 // The site is statically built, so nothing here can be rendered per-visitor:
-// both links ship in every copy of the HTML and exactly one is revealed once the
-// Worker answers "am I signed in?".
+// both links ship in every copy of the HTML and CSS reveals exactly one, keyed
+// off the flag Layout's head script stamps on <html> from the hint cookie. That
+// happens before the first paint, so the menu never arrives a link short.
 //
 // This is presentation only. /abbe is public HTML like every other page — the
 // real gate is the session cookie the Worker checks on anything that returns
@@ -9,8 +10,8 @@
 ---
 
 <span class="auth-nav" data-auth-nav>
-  <a class="auth-link" href="/abbe" data-auth="in" hidden>abbe</a>
-  <a class="auth-link" href="/api/abbe/web/login?returnTo=/abbe" data-auth="out" hidden>logga in</a>
+  <a class="auth-link" href="/abbe" data-auth="in">abbe</a>
+  <a class="auth-link" href="/api/abbe/web/login?returnTo=/abbe" data-auth="out">logga in</a>
 </span>
 
 <script>
@@ -20,16 +21,14 @@
     if (root.dataset.ready) return
     root.dataset.ready = '1'
 
-    let signedIn = false
+    // Revalidation, not revelation: the right link is already on screen. This
+    // only matters when the hint is stale — a session revoked or expired since
+    // the last load — and it is off the critical path either way.
     try {
       const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
-      signedIn = res.ok
+      document.documentElement.dataset.session = res.ok ? 'in' : 'out'
     } catch {
-      // Offline, or the Worker is down. Fall through as signed out.
-    }
-
-    for (const link of root.querySelectorAll<HTMLElement>('[data-auth]')) {
-      link.hidden = link.dataset.auth !== (signedIn ? 'in' : 'out')
+      // Offline, or the Worker is down. Leave the optimistic paint alone.
     }
   }
 
@@ -48,9 +47,16 @@
     display: contents;
   }
 
-  /* .menu a sets display: inline-block, which would otherwise beat the browser's
-     own [hidden] rule. */
-  .auth-link[hidden] {
+  /* Two classes, because .menu a is a class and a type and would otherwise win
+     and show both links at once. */
+  .auth-nav .auth-link {
     display: none;
+  }
+
+  /* :global() on the <html> half: Astro's scoping would otherwise want this
+     component's attribute on the root element, which never has it. */
+  :global(html[data-session='in']) .auth-link[data-auth='in'],
+  :global(html[data-session='out']) .auth-link[data-auth='out'] {
+    display: inline-block;
   }
 </style>

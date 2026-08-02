@@ -9,6 +9,10 @@
  * cookie authorizes nothing but "you are signed in": it is not accepted on
  * /mcp, so it can never be spent on vault tools.
  *
+ * Alongside it rides a second, deliberately readable cookie — see HINT_COOKIE.
+ * The split is the point: authority lives in the cookie JavaScript cannot read,
+ * and the cookie JavaScript can read carries no authority at all.
+ *
  *   GET  /web/login     bounce to Google, remembering where to come back to
  *   GET  /web/callback   verify, check the allowlist, set the session cookie
  *   GET  /web/me         "am I signed in?" — the only thing the site asks
@@ -26,6 +30,23 @@ import { escapeHtml, page } from "./html";
 
 const SESSION_COOKIE = "abbe_session";
 const STATE_COOKIE = "abbe_login_state";
+
+/**
+ * The one cookie here that is *not* HttpOnly, and the only one the site's own
+ * JavaScript is meant to read. It says "this browser signed in recently" and
+ * nothing more: no session id, no email, nothing that can be spent anywhere.
+ *
+ * It exists because the site is static. Without it a page cannot know which of
+ * its two states to paint until a round trip to this Worker has answered, so it
+ * paints neither and the visitor watches an empty screen for the length of a
+ * network hop. With it, the page commits to an answer immediately and this
+ * Worker corrects it a moment later.
+ *
+ * Nothing on this side ever reads it: `currentSession` authorizes on the
+ * HttpOnly session cookie alone, so forging this one buys you a differently
+ * painted page and not one byte of vault content.
+ */
+const HINT_COOKIE = "abbe_hint";
 
 const SESSION_TTL_S = 7 * 24 * 60 * 60;
 /** How long a login may sit half-finished at Google. */
@@ -54,6 +75,8 @@ function site(env: Cloudflare.Env) {
     basePath: base || "/",
     /** State cookie scope: only the login endpoints need it. */
     loginPath: `${base}/web`,
+    /** Hint cookie scope: the whole site, since any page may paint from it. */
+    hintPath: "/",
     callbackUrl: `${origin}${base}/web/callback`,
     // Secure is required in production. Plain-http localhost is already treated
     // as a secure context by browsers, but would refuse a Secure cookie.
@@ -76,23 +99,38 @@ function parseCookies(header: string | null): Record<string, string> {
 function cookie(
   name: string,
   value: string,
-  opts: { path: string; maxAge: number; secure: boolean },
+  opts: { path: string; maxAge: number; secure: boolean; readable?: boolean },
 ): string {
   const parts = [
     `${name}=${value}`,
     `Path=${opts.path}`,
     `Max-Age=${opts.maxAge}`,
-    "HttpOnly",
     // Lax, not Strict: the return trip from Google is a cross-site top-level
     // GET, which Lax allows and Strict would strip — breaking every login.
     "SameSite=Lax",
   ];
+  // HttpOnly unless a caller opts out in as many words, and the only caller
+  // that does is the hint cookie, which carries nothing worth stealing.
+  if (!opts.readable) parts.push("HttpOnly");
   if (opts.secure) parts.push("Secure");
   return parts.join("; ");
 }
 
-function clearCookie(name: string, path: string, secure: boolean): string {
-  return cookie(name, "", { path, maxAge: 0, secure });
+function clearCookie(name: string, path: string, secure: boolean, readable = false): string {
+  return cookie(name, "", { path, maxAge: 0, secure, readable });
+}
+
+/**
+ * The readable "you signed in" flag, as a Set-Cookie. A `maxAge` of 0 deletes
+ * it, which is how a browser holding a stale hint gets put straight.
+ */
+function hintCookie(cfg: ReturnType<typeof site>, maxAge: number): string {
+  return cookie(HINT_COOKIE, maxAge > 0 ? "1" : "", {
+    path: cfg.hintPath,
+    maxAge,
+    secure: cfg.secure,
+    readable: true,
+  });
 }
 
 /* -------------------------------------------------------------------- utils */
@@ -264,14 +302,36 @@ expired on the way. Start over.</p>
       secure: cfg.secure,
     }),
   );
+  // Same lifetime as the session it hints at, so the two lapse together.
+  headers.append("set-cookie", hintCookie(cfg, SESSION_TTL_S));
   headers.append("set-cookie", dropState);
   return new Response(null, { status: 302, headers });
 }
 
 async function handleMe(request: Request, env: Cloudflare.Env): Promise<Response> {
+  const cfg = site(env);
   const session = await currentSession(request, env);
-  if (!session) return json({ authenticated: false }, 401);
-  return json({ authenticated: true, email: session.email, name: session.name });
+
+  // This endpoint is the authority the optimistic paint answers to, so it is
+  // also what keeps the hint honest — in both directions.
+  if (!session) {
+    // Revoked out of the allowlist, expired, or never real: whatever the
+    // browser was painting from, it does not get to paint from it again.
+    return json({ authenticated: false }, 401, [["set-cookie", hintCookie(cfg, 0)]]);
+  }
+
+  // Re-issued rather than only set at login, so a browser that signed in before
+  // the hint existed picks one up on its next page load instead of waiting out
+  // the session. Its life is what the session has left — never a fresh week —
+  // so the hint cannot outlive the thing it is a hint about.
+  const createdAt = Date.parse(session.createdAt);
+  const remaining = Number.isFinite(createdAt)
+    ? Math.max(0, SESSION_TTL_S - Math.floor((Date.now() - createdAt) / 1000))
+    : SESSION_TTL_S;
+
+  return json({ authenticated: true, email: session.email, name: session.name }, 200, [
+    ["set-cookie", hintCookie(cfg, remaining)],
+  ]);
 }
 
 async function handleLogout(request: Request, env: Cloudflare.Env): Promise<Response> {
@@ -280,6 +340,7 @@ async function handleLogout(request: Request, env: Cloudflare.Env): Promise<Resp
   if (id) await env.OAUTH_KV.delete(KV_PREFIX + (await sha256Hex(id)));
   return json({ authenticated: false }, 200, [
     ["set-cookie", clearCookie(SESSION_COOKIE, cfg.basePath, cfg.secure)],
+    ["set-cookie", hintCookie(cfg, 0)],
   ]);
 }
 
