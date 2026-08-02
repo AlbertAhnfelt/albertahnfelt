@@ -5,9 +5,14 @@ import { ClientRouter } from 'astro:transitions'
 const SITE_NAME = 'Albert Ahnfelt'
 const DEFAULT_DESCRIPTION = 'Albert Ahnfelts sajt.'
 
-const { title, description } = Astro.props
+// `authTitle` is for pages that are one thing signed out and another signed in.
+// The rendered <title> is always the signed-out one — that is what ships in the
+// static HTML, what crawlers read, and what a stranger's tab says. The signed-in
+// title is carried separately and only ever applied by the script below.
+const { title, description, authTitle } = Astro.props
 const pageTitle = title ? `${title} — ${SITE_NAME}` : SITE_NAME
 const pageDescription = description ?? DEFAULT_DESCRIPTION
+const signedInTitle = authTitle ? `${authTitle} — ${SITE_NAME}` : null
 const canonicalURL = new URL(Astro.url.pathname, Astro.site)
 ---
 <html lang="sv">
@@ -17,6 +22,54 @@ const canonicalURL = new URL(Astro.url.pathname, Astro.site)
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" href={canonicalURL} />
     <title>{pageTitle}</title>
+    {signedInTitle && <meta name="auth-title" content={signedInTitle} />}
+    <!-- Blocking, and in the head on purpose. The signed-in state of this site
+         used to be decided by a fetch to the Worker, which meant an auth-aware
+         page painted nothing at all until a network round trip came back — the
+         better part of a second of empty screen, then a jump, then the tab
+         title changing under you. This reads the hint cookie the Worker sets at
+         login and commits to an answer before the first frame. The fetch still
+         happens, and still overrules this; it just no longer holds the page.
+
+         Reading a cookie is not a security check and this does not pretend to
+         be one. It decides which of two blocks of already-public HTML to show.
+         Every byte of actual vault content still comes from an endpoint that
+         re-validates the HttpOnly session cookie server-side, and a stale hint
+         is answered by /web/me deleting it. -->
+    <script is:inline>
+      ;(function () {
+        var apply = function () {
+          var signedIn = false
+          try {
+            signedIn = /(?:^|;\s*)abbe_hint=1(?:\s*;|\s*$)/.test(document.cookie)
+          } catch (e) {
+            // Cookies blocked outright. Signed out is the safe way to be wrong.
+          }
+
+          var root = document.documentElement
+          root.dataset.session = signedIn ? 'in' : 'out'
+
+          // Read from the head rather than closed over, so this stays correct
+          // for whichever page it is looking at after a client-side navigation.
+          var meta = document.querySelector('meta[name="auth-title"]')
+          if (signedIn && meta && document.title !== meta.content) {
+            // Stashed so the page can put it back if /web/me disagrees.
+            root.dataset.publicTitle = document.title
+            document.title = meta.content
+          }
+        }
+
+        apply()
+
+        // ClientRouter copies the incoming document's <html> attributes over the
+        // live ones, so the flag has to be restamped after every swap. This
+        // fires before the new page paints, which is exactly the right moment.
+        if (!window.__authPaint) {
+          window.__authPaint = true
+          document.addEventListener('astro:after-swap', apply)
+        }
+      })()
+    </script>
     <meta name="description" content={pageDescription} />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content={SITE_NAME} />
