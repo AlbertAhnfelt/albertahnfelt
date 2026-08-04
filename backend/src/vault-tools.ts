@@ -10,17 +10,16 @@
  */
 
 import { z } from "zod";
+import { type LogType, writeLog } from "./log";
 import {
   INDEX_KEY,
   LOG_PREFIX,
   TRASH_PREFIX,
   isSafeListPrefix,
-  isSafeLogSlug,
   isSafeMarkdownKey,
   isWritableKey,
   listAllKeys,
   listLevel,
-  vaultDate,
 } from "./vault";
 
 /**
@@ -290,36 +289,17 @@ export const TOOLS: ToolSpec[] = [
       ["title_slug", "type", "body"],
     ),
     handler: async (vault, args) => {
-      const titleSlug = args.title_slug as string;
-      const type = args.type as string;
       const body = args.body as string;
-      const tags = (args.tags as string[] | undefined) ?? [];
-
-      if (!isSafeLogSlug(titleSlug)) {
-        return fail(`Invalid title_slug "${titleSlug}": letters, digits, spaces and dashes only.`);
-      }
-      if (type !== "changes" && type !== "ideas") {
-        return fail(`Invalid type "${type}": expected "changes" or "ideas".`);
-      }
-
-      const date = vaultDate();
-      const path = `${LOG_PREFIX}${date.slice(0, 7)}/${date} ${titleSlug}.md`;
-      const allTags = [type, ...tags.filter((t) => t !== type)];
-      const frontmatter = [
-        "---",
-        "provenance: ai",
-        `date: ${date}`,
-        `type: ${type}`,
-        `tags: [${allTags.join(", ")}]`,
-        "---",
-        "",
-      ].join("\n");
-
-      const res = await vault.put(path, frontmatter + body, { ...MD, ...CREATE_ONLY });
-      if (!res) {
-        return fail(`Refused: ${path} already exists. Pick a different title_slug for this session.`);
-      }
-      return ok(`Logged session to ${path} (${body.length} chars).`);
+      // Path, frontmatter and the refusal to overwrite all live in log.ts, so
+      // the nightly sweep writes exactly the same kind of page this does.
+      const res = await writeLog(vault, {
+        titleSlug: args.title_slug as string,
+        type: args.type as LogType,
+        body,
+        tags: (args.tags as string[] | undefined) ?? [],
+      });
+      if (!res.ok) return fail(res.error);
+      return ok(`Logged session to ${res.path} (${body.length} chars).`);
     },
   },
 
