@@ -52,7 +52,8 @@ const CREATE_ONLY = { onlyIf: new Headers({ "If-None-Match": "*" }) };
 
 const MD = { httpMetadata: { contentType: "text/markdown; charset=utf-8" } };
 
-const WRITE_SCOPE_MSG = "writes are only allowed under wiki/ or ai/ (and never into the trash)";
+const WRITE_SCOPE_MSG =
+  "writes are only allowed under human/, wiki/ or ai/ (and never into the trash)";
 
 /** Gemini rejects an OBJECT schema with no properties, so paramless tools omit it. */
 const obj = (properties: Record<string, unknown>, required: string[]) => ({
@@ -144,7 +145,8 @@ export const TOOLS: ToolSpec[] = [
       "(fails if the page already exists). To OVERWRITE: pass the etag from read_page " +
       "(fails if the page changed since you read it — re-read and retry). " +
       "For small changes to existing pages prefer edit_page. " +
-      "Writable areas: wiki/ and ai/ only; overwrites are permanent (no version history). " +
+      "Writable areas: human/, wiki/ and ai/ only; overwrites are permanent (no version " +
+      "history). " +
       `After creating a wiki page, add it to ${INDEX_KEY}.`,
     input: {
       path: z.string().min(1),
@@ -153,7 +155,7 @@ export const TOOLS: ToolSpec[] = [
     },
     parameters: obj(
       {
-        path: str("Vault path under wiki/ or ai/, ending in .md."),
+        path: str("Vault path under human/, wiki/ or ai/, ending in .md."),
         content: str("Full page content."),
         expected_etag: str("Etag from read_page. Omit to create a new page."),
       },
@@ -200,7 +202,7 @@ export const TOOLS: ToolSpec[] = [
     },
     parameters: obj(
       {
-        path: str("Vault path under wiki/ or ai/."),
+        path: str("Vault path under human/, wiki/ or ai/."),
         old_string: str("Exact text to replace."),
         new_string: str("Replacement text."),
         replace_all: { type: "BOOLEAN", description: "Replace every occurrence." },
@@ -241,7 +243,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "move_page",
     description:
-      "Move or rename a page within the writable areas (wiki/ and ai/). Fails if the " +
+      "Move or rename a page within the writable areas (human/, wiki/ and ai/). Fails if the " +
       `destination already exists. Remember to update ${INDEX_KEY} and any links.`,
     input: { from: z.string().min(1), to: z.string().min(1) },
     parameters: obj({ from: str("Current path."), to: str("Destination path.") }, ["from", "to"]),
@@ -327,7 +329,7 @@ export const TOOLS: ToolSpec[] = [
       "Soft-delete a page from the writable areas: it is moved into the trash " +
       `(${TRASH_PREFIX}) rather than destroyed. Remember to update ${INDEX_KEY}.`,
     input: { path: z.string().min(1) },
-    parameters: obj({ path: str("Vault path under wiki/ or ai/.") }, ["path"]),
+    parameters: obj({ path: str("Vault path under human/, wiki/ or ai/.") }, ["path"]),
     handler: async (vault, args) => {
       const path = args.path as string;
       if (!isWritableKey(path)) return fail(`Refused: ${WRITE_SCOPE_MSG} (got "${path}").`);

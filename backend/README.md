@@ -6,8 +6,8 @@ whole pages via `read_page`). Design doc: vault `ai/Abbe Architecture.md`.
 
 ## Layout in the `abbe-vault` R2 bucket
 
-Mirrors the Obsidian vault: `human/` and `external/` are read-only sources;
-`wiki/` and `ai/` are AI-writable. Deleted pages land in `wiki/.trash/`.
+Mirrors the Obsidian vault: `external/` is read-only source material;
+`human/`, `wiki/` and `ai/` are AI-writable. Deleted pages land in `wiki/.trash/`.
 
 ## MCP tools
 
