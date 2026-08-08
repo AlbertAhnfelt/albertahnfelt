@@ -34,6 +34,8 @@ export type ChatSummary = {
   updated_at: number;
   message_count: number;
   logged_at: number | null;
+  /** Failed sweep attempts. Read so the sweep can say when it is giving up. */
+  log_attempts: number;
 };
 
 export type StoredMessage = {
@@ -83,7 +85,8 @@ function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}\n…[trimmed]`;
 }
 
-const SUMMARY_COLUMNS = "id, title, created_at, updated_at, message_count, logged_at";
+const SUMMARY_COLUMNS =
+  "id, title, created_at, updated_at, message_count, logged_at, log_attempts";
 
 /* ------------------------------------------------------------------- reading */
 
@@ -174,6 +177,7 @@ export async function createConversation(
     updated_at: now,
     message_count: 0,
     logged_at: null,
+    log_attempts: 0,
   };
 
   await db
@@ -190,9 +194,13 @@ export async function createConversation(
 /**
  * Append a message and move the conversation's clock.
  *
- * One batch, so a stored message always comes with the bumped count that makes
- * the next `seq` correct — the count is what the next append reads instead of a
- * MAX(seq), and the two drifting apart would collide on the unique index.
+ * One batch, and it has to be: `seq` comes from message_count rather than a
+ * MAX(seq), so a stored message and the bumped count are the same fact written
+ * twice. If the insert landed and the update did not, the next append would
+ * reuse the seq and collide on the unique index — for good, since the count
+ * would never catch up. D1 runs a batch atomically, which is what makes reading
+ * the count safe in the first place.
+ *
  * Returns the new message's id, which the tool rows hang off.
  */
 async function appendMessage(
@@ -203,37 +211,43 @@ async function appendMessage(
   const now = Date.now();
   const seq = conversation.message_count;
 
-  const inserted = await db
-    .prepare(
-      `INSERT INTO messages (conversation_id, seq, role, text, created_at, model, partial)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id`,
-    )
-    .bind(
-      conversation.id,
-      seq,
-      message.role,
-      message.text,
-      now,
-      message.model ?? null,
-      message.partial ? 1 : 0,
-    )
-    .first<{ id: number }>();
+  const [insert] = await db.batch<{ id: number }>([
+    db
+      .prepare(
+        `INSERT INTO messages (conversation_id, seq, role, text, created_at, model, partial)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id`,
+      )
+      .bind(
+        conversation.id,
+        seq,
+        message.role,
+        message.text,
+        now,
+        message.model ?? null,
+        message.partial ? 1 : 0,
+      ),
+    db
+      .prepare(
+        `UPDATE conversations
+         SET message_count = ?2, updated_at = ?3, model = COALESCE(?4, model)
+         WHERE id = ?1`,
+      )
+      .bind(conversation.id, seq + 1, now, message.model ?? null),
+  ]);
 
-  await db
-    .prepare(
-      `UPDATE conversations
-       SET message_count = ?2, updated_at = ?3, model = COALESCE(?4, model)
-       WHERE id = ?1`,
-    )
-    .bind(conversation.id, seq + 1, now, message.model ?? null)
-    .run();
+  // Thrown, not defaulted. A missing id used to become 0, which then went onto
+  // the tool rows as a message_id pointing at nothing — a foreign-key violation
+  // the caller catches and logs, leaving a stored reply whose tool calls
+  // vanished. Better to fail here, where the reason is still legible.
+  const id = insert.results[0]?.id;
+  if (id === undefined) throw new Error("message insert returned no id");
 
   // Kept in step with the row that was just written, so a caller appending
   // twice in one turn does not have to re-read it.
   conversation.message_count = seq + 1;
   conversation.updated_at = now;
 
-  return inserted?.id ?? 0;
+  return id;
 }
 
 export function appendUserMessage(
@@ -299,20 +313,27 @@ export async function appendModelMessage(
  * Not scoped by email: the sweep runs without a request and so without a
  * session. It reads rows whose owner is already recorded on them and writes
  * only under ai/log/, so there is no identity here for it to get wrong.
+ *
+ * `maxAttempts` is what keeps the queue moving. Failure does not touch
+ * updated_at, and the oldest rows are taken first, so without a cap a
+ * conversation that can never be logged would sit at the head of this list
+ * forever and spend one of the batch's slots every night.
  */
 export async function conversationsToLog(
   db: D1Database,
   idleBefore: number,
   minMessages: number,
+  maxAttempts: number,
   limit: number,
 ): Promise<ChatSummary[]> {
   const { results } = await db
     .prepare(
       `SELECT ${SUMMARY_COLUMNS} FROM conversations
        WHERE logged_at IS NULL AND updated_at < ?1 AND message_count >= ?2
-       ORDER BY updated_at ASC LIMIT ?3`,
+         AND log_attempts < ?3
+       ORDER BY updated_at ASC LIMIT ?4`,
     )
-    .bind(idleBefore, minMessages, limit)
+    .bind(idleBefore, minMessages, maxAttempts, limit)
     .all<ChatSummary>();
   return results;
 }
@@ -321,5 +342,16 @@ export async function markLogged(db: D1Database, id: string, path: string): Prom
   await db
     .prepare("UPDATE conversations SET logged_at = ?2, log_path = ?3 WHERE id = ?1")
     .bind(id, Date.now(), path)
+    .run();
+}
+
+/**
+ * Count a failed attempt, so a conversation that cannot be logged eventually
+ * stops being tried. The id comes from a row the sweep just read out of D1.
+ */
+export async function recordLogFailure(db: D1Database, id: string): Promise<void> {
+  await db
+    .prepare("UPDATE conversations SET log_attempts = log_attempts + 1 WHERE id = ?1")
+    .bind(id)
     .run();
 }

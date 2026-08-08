@@ -146,21 +146,35 @@ export async function handleChat(
   let conversation: ChatSummary;
   let history: Content[] = [];
 
-  if (incoming.conversationId) {
-    const existing = await getConversation(env.DB, session.email, incoming.conversationId);
-    if (!existing) return json({ error: "not found" }, 404);
-    conversation = existing;
-    history = windowFor(await getMessages(env.DB, conversation.id)).map((m) => ({
-      role: m.role,
-      parts: [{ text: m.text }],
-    }));
-  } else {
-    conversation = await createConversation(env.DB, session.email, incoming.text);
-  }
+  // Storage is allowed to fail — two tabs sending at once collide on the unique
+  // index over (conversation_id, seq) — and it has to fail as JSON like every
+  // other path here. Left unguarded this threw out of the handler and the
+  // runtime answered with a plain-text 500 the page could not read.
+  try {
+    if (incoming.conversationId) {
+      const existing = await getConversation(env.DB, session.email, incoming.conversationId);
+      // A conversation that is not the caller's is missing, not forbidden. This
+      // is a return rather than a throw, so the catch below never sees it and
+      // cannot turn it into anything else.
+      if (!existing) return json({ error: "not found" }, 404);
+      conversation = existing;
+      history = windowFor(await getMessages(env.DB, conversation.id)).map((m) => ({
+        role: m.role,
+        parts: [{ text: m.text }],
+      }));
+    } else {
+      conversation = await createConversation(env.DB, session.email, incoming.text);
+    }
 
-  // Stored before the model is asked anything, so a turn that fails on the way
-  // out still leaves what Albert actually said.
-  await appendUserMessage(env.DB, conversation, incoming.text);
+    // Stored before the model is asked anything, so a turn that fails on the way
+    // out still leaves what Albert actually said.
+    await appendUserMessage(env.DB, conversation, incoming.text);
+  } catch (cause) {
+    // Name only, and only to the log: nothing about the failure goes back in the
+    // body beyond the status.
+    console.error("chat: could not open the conversation", cause instanceof Error ? cause.name : "");
+    return json({ error: "could not store the message" }, 503);
+  }
 
   const contents: Content[] = [...history, { role: "user", parts: [{ text: incoming.text }] }];
   const model = env.GEMINI_MODEL || DEFAULT_MODEL;
