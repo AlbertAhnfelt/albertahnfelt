@@ -13,6 +13,21 @@
       "bucket_name": "abbe-vault"
     }
   ],
+  "d1_databases": [
+    {
+      // Website chat history: conversations, messages and the tool calls behind
+      // each reply. Nothing the vault owns lives here — the vault is R2.
+      "binding": "DB",
+      "database_name": "abbe",
+      "database_id": "90def425-c3be-4e17-a14e-2a32dca57006"
+    }
+  ],
+  // Once a day, distil conversations that have gone quiet into ai/log/.
+  // 04:00 UTC: nothing is being written then, and a failed run has a whole day
+  // to be noticed before the next one.
+  "triggers": {
+    "crons": ["0 4 * * *"]
+  },
   "kv_namespaces": [
     {
       // OAuth grants, tokens (hashed) and dynamically registered clients,

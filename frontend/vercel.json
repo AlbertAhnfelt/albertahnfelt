@@ -8,6 +8,10 @@
     {
       "source": "/vault/:path*",
       "destination": "/vault"
+    },
+    {
+      "source": "/abbe/:path*",
+      "destination": "/abbe"
     }
   ]
 }

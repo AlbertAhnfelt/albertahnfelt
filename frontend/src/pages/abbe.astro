@@ -4,16 +4,21 @@ import BackArrow from '../components/BackArrow.astro'
 import MoonCorner from '../components/MoonCorner.astro'
 import NotFound from '../components/NotFound.astro'
 
-// Placeholder for the Abbe interface. Everything below is static public HTML —
-// signed-in state only decides which block is shown. When this page starts
-// showing vault content it has to come from a cookie-authenticated Worker
-// endpoint, never from anything baked in at build time.
+// The Abbe interface. Everything below is static public HTML — signed-in state
+// only decides which block is shown, and not one conversation, title or word of
+// a transcript is baked in at build time. All of it arrives at runtime from a
+// cookie-authenticated Worker endpoint.
 //
 // Anyone who is not signed in gets the site's ordinary 404 and nothing else: no
 // notice, no login link, nothing that names Abbe. That is presentation only —
 // every real check lives in the Worker, which re-validates the session cookie
 // against the allowlist on every request. Signing in is done by going straight
 // to /api/abbe/web/login?returnTo=/abbe.
+//
+// One page serves both a new conversation and an existing one; which is decided
+// from location.pathname. /abbe/:id is rewritten here by vercel.json (and by the
+// dev middleware in astro.config.mjs), because a conversation id cannot be
+// prerendered — knowing them at build time would mean knowing the history.
 ---
 
 <!-- Titled 404, not Abbe: the static HTML every visitor gets should read as the
@@ -32,22 +37,32 @@ import NotFound from '../components/NotFound.astro'
     <main data-state="in">
       <BackArrow href="/" label="Till startsidan" variant="corner" />
 
-      <div class="content">
-        <section class="abbe">
-          <div class="term">
-            <h1>Abbe.</h1>
+      <div class="shell">
+        <!-- History. A sticky column beside the chat on a wide screen, a
+             sideways-scrolling strip above it on a narrow one. Empty in the
+             shipped HTML; filled from /web/chats once the session is real. -->
+        <nav class="rail" aria-label="Konversationer">
+          <button class="new" type="button" data-new>ny</button>
+          <div class="rail-list" data-rail-list></div>
+        </nav>
 
-            <div data-log></div>
+        <div class="content">
+          <section class="abbe">
+            <div class="term">
+              <h1>Abbe.</h1>
 
-            <form class="line me" data-form>
-              <span class="who">Albert</span>
-              <div class="field">
-                <div class="mirror"><span data-mirror></span><span class="cursor"></span></div>
-                <textarea data-input rows="1" autocomplete="off" spellcheck="false"></textarea>
-              </div>
-            </form>
-          </div>
-        </section>
+              <div data-log></div>
+
+              <form class="line me" data-form>
+                <span class="who">Albert</span>
+                <div class="field">
+                  <div class="mirror"><span data-mirror></span><span class="cursor"></span></div>
+                  <textarea data-input rows="1" autocomplete="off" spellcheck="false"></textarea>
+                </div>
+              </form>
+            </div>
+          </section>
+        </div>
       </div>
 
       <MoonCorner variant="bottom-center" />
@@ -56,6 +71,17 @@ import NotFound from '../components/NotFound.astro'
 </Layout>
 
 <script>
+  /** A conversation as the sidebar knows it. No transcript. */
+  type ChatSummary = { id: string; title: string; updated_at: number }
+
+  /** One stored turn, as /web/chats/:id returns it. */
+  type StoredMessage = { role: 'user' | 'model'; text: string; partial: boolean }
+
+  const API = '/api/abbe/web'
+
+  /** The shape the Worker mints. Anything else is not a conversation id. */
+  const ID = /^[0-9a-f]{64}$/
+
   /**
    * Which block is real. One flag on <html>, set here and by Layout's head
    * script, with CSS doing the showing — so the same switch works before this
@@ -83,18 +109,11 @@ import NotFound from '../components/NotFound.astro'
     }
   }
 
-  const signedIn = (root: HTMLElement) => {
-    show('in')
-    title('in')
-    chat(root)
+  /** The conversation this URL asks for, or null for a fresh one. */
+  const idFromUrl = (): string | null => {
+    const rest = window.location.pathname.replace(/^\/abbe\/?/, '')
+    return ID.test(rest) ? rest : null
   }
-
-  const signedOut = () => {
-    show('out')
-    title('out')
-  }
-
-  type Turn = { role: 'user' | 'model'; text: string }
 
   const chat = (root: HTMLElement) => {
     // signedIn() runs twice on a normal load — once on the hint, once when
@@ -106,24 +125,29 @@ import NotFound from '../components/NotFound.astro'
     const input = root.querySelector<HTMLTextAreaElement>('[data-input]')
     const mirror = root.querySelector<HTMLElement>('[data-mirror]')
     const log = root.querySelector<HTMLElement>('[data-log]')
-    if (!form || !input || !mirror || !log) return
+    const railList = root.querySelector<HTMLElement>('[data-rail-list]')
+    const newButton = root.querySelector<HTMLButtonElement>('[data-new]')
+    if (!form || !input || !mirror || !log || !railList || !newButton) return
 
-    // The Worker is stateless, so the page owns the conversation and posts it
-    // whole each turn. In memory only — nothing is persisted anywhere.
-    const history: Turn[] = []
+    // The Worker owns the transcript; this holds only what is on screen. The
+    // conversation is identified by its id and nothing is replayed from here.
+    let chats: ChatSummary[] = []
+    let currentId: string | null = null
     let pending = false
 
-    const say = (role: 'me' | 'abbe', text: string) => {
+    /* ---------------------------------------------------------- transcript */
+
+    const say = (role: 'me' | 'abbe', text: string, partial = false) => {
       const line = document.createElement('div')
       // Role lives on the row, not the label: it colours the whole line.
-      line.className = `line ${role}`
+      line.className = `line ${role}${partial ? ' partial' : ''}`
 
       const who = document.createElement('span')
       who.className = 'who'
       who.textContent = role === 'me' ? 'Albert' : 'Abbe'
 
       const body = document.createElement('span')
-      // textContent, never innerHTML: replies will eventually carry vault text.
+      // textContent, never innerHTML: replies carry vault text via a model.
       body.textContent = text
 
       line.append(who, body)
@@ -132,6 +156,84 @@ import NotFound from '../components/NotFound.astro'
       // Returned so a pending row can be rewritten in place once it answers.
       return body
     }
+
+    /* -------------------------------------------------------------- history */
+
+    const renderRail = () => {
+      railList.replaceChildren()
+      for (const item of chats) {
+        const link = document.createElement('a')
+        link.className = 'entry'
+        link.href = `/abbe/${item.id}`
+        // textContent, never innerHTML: a title is the first thing said, echoed.
+        link.textContent = item.title
+        // The date lives here rather than on screen — the list is already in
+        // recency order, and this keeps the rail to one line per conversation.
+        link.title = new Date(item.updated_at).toLocaleString('sv-SE')
+        if (item.id === currentId) link.setAttribute('aria-current', 'page')
+        railList.append(link)
+      }
+    }
+
+    const loadChats = async () => {
+      try {
+        const res = await fetch(`${API}/chats`, { headers: { accept: 'application/json' } })
+        if (!res.ok) return
+        chats = ((await res.json()) as { chats: ChatSummary[] }).chats
+        renderRail()
+      } catch {
+        // A rail that failed to load is a rail that is empty. The chat itself
+        // does not depend on it, so there is nothing to say about this.
+      }
+    }
+
+    /** Move the conversation just spoken in to the front, where it belongs. */
+    const touch = (id: string) => {
+      const at = chats.findIndex((item) => item.id === id)
+      if (at === -1) return
+      const [item] = chats.splice(at, 1)
+      chats.unshift({ ...item, updated_at: Date.now() })
+      renderRail()
+    }
+
+    /* ------------------------------------------------------------- routing */
+
+    const openChat = async (id: string) => {
+      try {
+        const res = await fetch(`${API}/chats/${id}`, { headers: { accept: 'application/json' } })
+        if (!res.ok) throw new Error(String(res.status))
+        const { messages } = (await res.json()) as { messages: StoredMessage[] }
+        log.replaceChildren()
+        for (const message of messages) {
+          say(message.role === 'user' ? 'me' : 'abbe', message.text, message.partial)
+        }
+      } catch {
+        log.replaceChildren()
+        say('abbe', '(kunde inte läsa konversationen)')
+      }
+    }
+
+    const route = async () => {
+      const id = idFromUrl()
+      // Already showing this one. Matters because every reply replaces the URL,
+      // and re-reading the transcript we just wrote would be a visible flicker.
+      if (id === currentId) return
+
+      currentId = id
+      log.replaceChildren()
+      renderRail()
+      if (id) await openChat(id)
+      form.scrollIntoView({ block: 'nearest' })
+    }
+
+    const startNew = () => {
+      if (currentId === null) return input.focus()
+      window.history.pushState({}, '', '/abbe')
+      void route()
+      input.focus()
+    }
+
+    /* --------------------------------------------------------------- input */
 
     // The textarea's own text is transparent; this mirror is what you actually
     // read, and it carries the block cursor. Both share one grid cell, so the
@@ -147,20 +249,23 @@ import NotFound from '../components/NotFound.astro'
       if (!text || pending) return
 
       say('me', text)
-      history.push({ role: 'user', text })
       input.value = ''
       sync()
 
       pending = true
       const row = say('abbe', '(thinking)')
+      // Captured now: the reply belongs to the conversation that was open when
+      // it was asked for, even if something navigates while it streams.
+      const asked = currentId
 
       try {
         // Same-origin, so the HttpOnly session cookie rides along and the
-        // Worker re-checks it. The vault is only ever touched over there.
-        const res = await fetch('/api/abbe/web/chat', {
+        // Worker re-checks it. The vault is only ever touched over there, and
+        // the transcript is read from D1 there too — this posts one message.
+        const res = await fetch(`${API}/chat`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ messages: history }),
+          body: JSON.stringify({ conversation_id: asked, text }),
         })
         if (!res.ok || !res.body) throw new Error(String(res.status))
 
@@ -181,10 +286,28 @@ import NotFound from '../components/NotFound.astro'
 
           for (const line of lines) {
             if (!line.trim()) continue
-            const event = JSON.parse(line) as { delta?: string; done?: boolean; error?: string }
+            const event = JSON.parse(line) as {
+              conversation?: { id: string; title: string }
+              delta?: string
+              done?: boolean
+              error?: string
+            }
             if (event.error) throw new Error(event.error)
-            if (event.delta === undefined) continue
 
+            // First line of every stream. On a fresh conversation this is how
+            // the page learns the id the Worker minted, and the URL becomes
+            // shareable without a navigation.
+            if (event.conversation) {
+              if (!currentId) {
+                currentId = event.conversation.id
+                window.history.replaceState({}, '', `/abbe/${currentId}`)
+                chats.unshift({ ...event.conversation, updated_at: Date.now() })
+                renderRail()
+              }
+              continue
+            }
+
+            if (event.delta === undefined) continue
             reply += event.delta
             // textContent, never innerHTML: this is vault text via a model.
             row.textContent = reply
@@ -193,11 +316,11 @@ import NotFound from '../components/NotFound.astro'
         }
 
         if (!reply) throw new Error('empty')
-        history.push({ role: 'model', text: reply })
+        if (asked) touch(asked)
       } catch {
         row.textContent = '(något gick fel)'
-        // The exchange never happened, so keep it out of the context sent next.
-        history.pop()
+        // The message itself is stored either way — the Worker writes it before
+        // asking the model — so there is nothing to take back here.
       } finally {
         pending = false
         form.scrollIntoView({ block: 'nearest' })
@@ -213,14 +336,47 @@ import NotFound from '../components/NotFound.astro'
       }
     })
 
-    // Clicking dead space in the transcript drops you back on the prompt,
-    // unless you were selecting text to copy.
-    root.addEventListener('click', () => {
+    newButton.addEventListener('click', startNew)
+
+    // Rail links are handled here rather than by the browser: a full navigation
+    // would re-run auth and re-fetch the whole list to move between two
+    // conversations this page already has.
+    root.addEventListener('click', (event) => {
+      const target = event.target as HTMLElement | null
+      const link = target?.closest?.('a')
+
+      if (link && link.getAttribute('href')?.startsWith('/abbe/')) {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+        event.preventDefault()
+        if (link.getAttribute('href') === window.location.pathname) return
+        window.history.pushState({}, '', link.getAttribute('href')!)
+        void route()
+        return
+      }
+
+      // Clicking dead space in the transcript drops you back on the prompt,
+      // unless you were selecting text to copy or aiming at a control.
+      if (link || target?.closest?.('button')) return
       if (!window.getSelection()?.toString()) input.focus()
     })
 
+    window.addEventListener('popstate', () => void route())
+
     sync()
+    void route()
+    void loadChats()
     input.focus()
+  }
+
+  const signedIn = (root: HTMLElement) => {
+    show('in')
+    title('in')
+    chat(root)
+  }
+
+  const signedOut = () => {
+    show('out')
+    title('out')
   }
 
   const resolve = async (root: HTMLElement) => {
@@ -244,7 +400,7 @@ import NotFound from '../components/NotFound.astro'
       // The authority, and the only thing that gets to be the last word. The
       // Worker deletes a stale hint on its way out of this call, so a session
       // that has been revoked cannot keep painting itself back in.
-      const res = await fetch('/api/abbe/web/me', { headers: { accept: 'application/json' } })
+      const res = await fetch(`${API}/me`, { headers: { accept: 'application/json' } })
       if (!res.ok) return signedOut()
 
       signedIn(root)
@@ -286,6 +442,12 @@ import NotFound from '../components/NotFound.astro'
     flex-direction: column;
   }
 
+  /* Narrow first: history above the chat, chat below it. */
+  .shell {
+    display: flex;
+    flex-direction: column;
+  }
+
   .content {
     display: flex;
     justify-content: center;
@@ -295,21 +457,123 @@ import NotFound from '../components/NotFound.astro'
   .abbe {
     width: 100%;
     max-width: 36rem;
-    margin-top: 4rem;
     font-size: 1rem;
     line-height: 1.6;
   }
 
+  /* ---------------------------------------------------------------- history */
+
+  /* On a narrow screen this scrolls sideways instead of down: the conversations
+     are one line each, and a vertical list of them would push the prompt off
+     the screen. The top margin is what clears the corner back arrow. */
+  .rail {
+    display: flex;
+    align-items: baseline;
+    gap: 1.25rem;
+    margin-top: 4rem;
+    padding: 0 1.5rem 0.75rem;
+    border-bottom: 1px solid rgba(239, 237, 234, 0.12);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    /* The strip is short and the entries are obviously draggable; a scrollbar
+       across them costs more than it explains. */
+    scrollbar-width: none;
+  }
+
+  .rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* `contents` so the entries become children of .rail itself and take part in
+     its row directly — one scroll container instead of two nested ones. */
+  .rail-list {
+    display: contents;
+  }
+
+  .rail .entry,
+  .new {
+    white-space: nowrap;
+    scroll-snap-align: start;
+    opacity: 0.45;
+    transition: opacity 0.15s ease;
+  }
+
+  .rail .entry:hover,
+  .new:hover {
+    opacity: 1;
+  }
+
+  /* The conversation on screen. Not underlined — it is where you already are. */
+  .rail .entry[aria-current='page'] {
+    opacity: 1;
+  }
+
+  .new {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
   @media (min-width: 768px) {
+    .shell {
+      flex-direction: row;
+      align-items: flex-start;
+    }
+
+    /* Stays put while the conversation scrolls past it. `max-height` rather
+       than `height`, so a short list makes a short column and the moon below
+       is not pushed off a mostly empty page. */
+    .rail {
+      position: sticky;
+      top: 0;
+      flex: 0 0 13rem;
+      flex-direction: column;
+      align-items: stretch;
+      max-height: 100vh;
+      margin-top: 0;
+      /* Top padding clears the back arrow, and stays out of the scrolling
+         area below — only .rail-list scrolls. */
+      padding: 4.5rem 1.25rem 2rem 1.5rem;
+      border-bottom: 0;
+      border-right: 1px solid rgba(239, 237, 234, 0.12);
+      overflow-x: visible;
+    }
+
+    /* The one thing that scrolls. `min-height: 0` is what lets a flex child
+       shrink below its content and actually overflow. */
+    .rail-list {
+      display: block;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior-y: contain;
+      scrollbar-width: thin;
+    }
+
+    .rail .entry {
+      display: block;
+      /* Titles are as long as the first thing said; the column is not. */
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 0.15rem 0;
+      font-size: 0.95rem;
+    }
+
     .content {
+      flex: 1;
       padding: 3vh 1.5rem 0;
     }
 
     .abbe {
-      margin-top: 6rem;
       font-size: 1.05rem;
     }
   }
+
+  /* ------------------------------------------------------------------ chat */
 
   .term {
     --me: #e2614f;
@@ -324,6 +588,7 @@ import NotFound from '../components/NotFound.astro'
 
   @media (min-width: 768px) {
     .term h1 {
+      margin-top: 4rem;
       font-size: 3rem;
     }
   }
@@ -360,6 +625,13 @@ import NotFound from '../components/NotFound.astro'
   .term :global(.line > span:last-child) {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  /* A reply whose stream died before the model finished. Stored and shown
+     rather than dropped, but marked, so it does not read as a whole thought. */
+  .term :global(.line.partial > span:last-child::after) {
+    content: ' …';
+    opacity: 0.4;
   }
 
   /* Joan ships Regular only, so the browser synthesises this weight. */
