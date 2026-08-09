@@ -1,0 +1,16 @@
+-- How many times the sweep has tried and failed to log a conversation.
+--
+-- Without this, a conversation the sweep cannot distil is picked up again every
+-- night forever: failure leaves logged_at NULL and does not touch updated_at,
+-- and the sweep selects the oldest unlogged rows first. So a single permanently
+-- failing conversation sits at the front of the queue for good, spends a model
+-- call a night on nothing, and — since the batch is capped — holds a slot that
+-- a conversation behind it needed. Three of them and the sweep stops making
+-- progress entirely, quietly.
+--
+-- Counted rather than flagged, because the failures worth retrying and the ones
+-- worth giving up on look identical at the point of failure: a model that
+-- returned nothing usable may well answer tomorrow, a title that collides with
+-- five existing log pages never will. A few attempts tells them apart without
+-- having to decide which is which.
+ALTER TABLE conversations ADD COLUMN log_attempts INTEGER NOT NULL DEFAULT 0;

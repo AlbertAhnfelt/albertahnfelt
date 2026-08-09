@@ -1,11 +1,16 @@
 /**
  * Vault key helpers. The R2 bucket mirrors the Obsidian vault layout:
- *   human/, external/          — read-only sources
- *   wiki/, ai/                 — AI-writable
+ *   external/                  — read-only source material
+ *   human/, wiki/, ai/         — AI-writable
  *   wiki/.trash/               — soft-deleted pages (managed by delete_page only)
+ *
+ * `human/` is writable because it holds core documents Albert wants kept up to
+ * date rather than only quoted from. It is still his prose, so an agent editing
+ * there is amending someone's own writing — a different act from maintaining
+ * wiki/ and ai/, which exist to be machine-maintained.
  */
 
-export const WRITABLE_PREFIXES = ["wiki/", "ai/"] as const;
+export const WRITABLE_PREFIXES = ["wiki/", "ai/", "human/"] as const;
 export const TRASH_PREFIX = "wiki/.trash/";
 export const INDEX_KEY = "wiki/index.md";
 export const INSTRUCTIONS_KEY = "ai/instructions.md";
@@ -32,7 +37,7 @@ export function isSafeMarkdownKey(key: string): boolean {
   return segments.every((s) => s.length > 0 && s !== "." && s !== "..");
 }
 
-/** True if `key` may be written by tools: safe, under wiki/ or ai/, and not in the trash. */
+/** True if `key` may be written by tools: safe, under a writable prefix, not in the trash. */
 export function isWritableKey(key: string): boolean {
   return (
     isSafeMarkdownKey(key) &&
@@ -78,10 +83,12 @@ export async function listLevel(
 }
 
 export const FALLBACK_INSTRUCTIONS = `You are connected to Abbe, a personal second-brain vault of markdown pages.
-Layout: human/ and external/ are read-only source material; wiki/ and ai/ are where you may write.
+Layout: external/ is read-only source material; human/, wiki/ and ai/ are where you may write.
 Rules: search only routes to pages — always read whole pages with read_page before acting.
 To overwrite a page you must first read it and pass back its etag. After creating, moving, or
 deleting a wiki page, update wiki/index.md accordingly.
+human/ is Albert's own writing, not a machine-maintained area: edit a page there when he asks
+you to, keep his voice, and prefer edit_page over rewriting a whole page.
 (This is fallback text — create ${INSTRUCTIONS_KEY} in the vault to replace it.)`;
 
 /** Load agent-facing instructions from the vault, falling back to the baked-in contract. */

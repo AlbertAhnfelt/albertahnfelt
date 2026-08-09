@@ -10,17 +10,16 @@
  */
 
 import { z } from "zod";
+import { type LogType, writeLog } from "./log";
 import {
   INDEX_KEY,
   LOG_PREFIX,
   TRASH_PREFIX,
   isSafeListPrefix,
-  isSafeLogSlug,
   isSafeMarkdownKey,
   isWritableKey,
   listAllKeys,
   listLevel,
-  vaultDate,
 } from "./vault";
 
 /**
@@ -52,7 +51,8 @@ const CREATE_ONLY = { onlyIf: new Headers({ "If-None-Match": "*" }) };
 
 const MD = { httpMetadata: { contentType: "text/markdown; charset=utf-8" } };
 
-const WRITE_SCOPE_MSG = "writes are only allowed under wiki/ or ai/ (and never into the trash)";
+const WRITE_SCOPE_MSG =
+  "writes are only allowed under human/, wiki/ or ai/ (and never into the trash)";
 
 /** Gemini rejects an OBJECT schema with no properties, so paramless tools omit it. */
 const obj = (properties: Record<string, unknown>, required: string[]) => ({
@@ -144,7 +144,8 @@ export const TOOLS: ToolSpec[] = [
       "(fails if the page already exists). To OVERWRITE: pass the etag from read_page " +
       "(fails if the page changed since you read it — re-read and retry). " +
       "For small changes to existing pages prefer edit_page. " +
-      "Writable areas: wiki/ and ai/ only; overwrites are permanent (no version history). " +
+      "Writable areas: human/, wiki/ and ai/ only; overwrites are permanent (no version " +
+      "history). " +
       `After creating a wiki page, add it to ${INDEX_KEY}.`,
     input: {
       path: z.string().min(1),
@@ -153,7 +154,7 @@ export const TOOLS: ToolSpec[] = [
     },
     parameters: obj(
       {
-        path: str("Vault path under wiki/ or ai/, ending in .md."),
+        path: str("Vault path under human/, wiki/ or ai/, ending in .md."),
         content: str("Full page content."),
         expected_etag: str("Etag from read_page. Omit to create a new page."),
       },
@@ -200,7 +201,7 @@ export const TOOLS: ToolSpec[] = [
     },
     parameters: obj(
       {
-        path: str("Vault path under wiki/ or ai/."),
+        path: str("Vault path under human/, wiki/ or ai/."),
         old_string: str("Exact text to replace."),
         new_string: str("Replacement text."),
         replace_all: { type: "BOOLEAN", description: "Replace every occurrence." },
@@ -241,7 +242,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "move_page",
     description:
-      "Move or rename a page within the writable areas (wiki/ and ai/). Fails if the " +
+      "Move or rename a page within the writable areas (human/, wiki/ and ai/). Fails if the " +
       `destination already exists. Remember to update ${INDEX_KEY} and any links.`,
     input: { from: z.string().min(1), to: z.string().min(1) },
     parameters: obj({ from: str("Current path."), to: str("Destination path.") }, ["from", "to"]),
@@ -288,36 +289,17 @@ export const TOOLS: ToolSpec[] = [
       ["title_slug", "type", "body"],
     ),
     handler: async (vault, args) => {
-      const titleSlug = args.title_slug as string;
-      const type = args.type as string;
       const body = args.body as string;
-      const tags = (args.tags as string[] | undefined) ?? [];
-
-      if (!isSafeLogSlug(titleSlug)) {
-        return fail(`Invalid title_slug "${titleSlug}": letters, digits, spaces and dashes only.`);
-      }
-      if (type !== "changes" && type !== "ideas") {
-        return fail(`Invalid type "${type}": expected "changes" or "ideas".`);
-      }
-
-      const date = vaultDate();
-      const path = `${LOG_PREFIX}${date.slice(0, 7)}/${date} ${titleSlug}.md`;
-      const allTags = [type, ...tags.filter((t) => t !== type)];
-      const frontmatter = [
-        "---",
-        "provenance: ai",
-        `date: ${date}`,
-        `type: ${type}`,
-        `tags: [${allTags.join(", ")}]`,
-        "---",
-        "",
-      ].join("\n");
-
-      const res = await vault.put(path, frontmatter + body, { ...MD, ...CREATE_ONLY });
-      if (!res) {
-        return fail(`Refused: ${path} already exists. Pick a different title_slug for this session.`);
-      }
-      return ok(`Logged session to ${path} (${body.length} chars).`);
+      // Path, frontmatter and the refusal to overwrite all live in log.ts, so
+      // the nightly sweep writes exactly the same kind of page this does.
+      const res = await writeLog(vault, {
+        titleSlug: args.title_slug as string,
+        type: args.type as LogType,
+        body,
+        tags: (args.tags as string[] | undefined) ?? [],
+      });
+      if (!res.ok) return fail(res.error);
+      return ok(`Logged session to ${res.path} (${body.length} chars).`);
     },
   },
 
@@ -327,7 +309,7 @@ export const TOOLS: ToolSpec[] = [
       "Soft-delete a page from the writable areas: it is moved into the trash " +
       `(${TRASH_PREFIX}) rather than destroyed. Remember to update ${INDEX_KEY}.`,
     input: { path: z.string().min(1) },
-    parameters: obj({ path: str("Vault path under wiki/ or ai/.") }, ["path"]),
+    parameters: obj({ path: str("Vault path under human/, wiki/ or ai/.") }, ["path"]),
     handler: async (vault, args) => {
       const path = args.path as string;
       if (!isWritableKey(path)) return fail(`Refused: ${WRITE_SCOPE_MSG} (got "${path}").`);

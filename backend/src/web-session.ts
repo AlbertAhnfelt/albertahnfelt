@@ -25,6 +25,7 @@
  */
 
 import { secretsEqual } from "./auth";
+import { DEFAULT_MODEL } from "./gemini";
 import { authorizeUrl, identityFromCode, isAllowedEmail, sign, unsign } from "./google";
 import { escapeHtml, page } from "./html";
 
@@ -329,7 +330,17 @@ async function handleMe(request: Request, env: Cloudflare.Env): Promise<Response
     ? Math.max(0, SESSION_TTL_S - Math.floor((Date.now() - createdAt) / 1000))
     : SESSION_TTL_S;
 
-  return json({ authenticated: true, email: session.email, name: session.name }, 200, [
+  // `model` rides along because the chat's status line names it, and this is the
+  // one call the page already makes before it can show anything. It is a var
+  // from wrangler.jsonc, not a secret, and only the authenticated branch says it.
+  const body = {
+    authenticated: true,
+    email: session.email,
+    name: session.name,
+    model: env.GEMINI_MODEL || DEFAULT_MODEL,
+  };
+
+  return json(body, 200, [
     ["set-cookie", hintCookie(cfg, remaining)],
   ]);
 }
