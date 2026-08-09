@@ -476,6 +476,11 @@ import NotFound from '../components/NotFound.astro'
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scroll-snap-type: x proximity;
+    /* A `start`-aligned snap target aligns to the scroll port's edge, which on
+       load meant snapping the first item flush to the screen and scrolling the
+       rail's own left padding out of view. This insets the snap edge instead, so
+       the strip starts where the rest of the page starts. */
+    scroll-padding-inline-start: 1.5rem;
     /* The strip is short and the entries are obviously draggable; a scrollbar
        across them costs more than it explains. */
     scrollbar-width: none;
@@ -491,7 +496,13 @@ import NotFound from '../components/NotFound.astro'
     display: contents;
   }
 
-  .rail .entry,
+  /* Rail entries are built with createElement, so they never receive Astro's
+     data-astro-cid-* attribute and the `.rail .entry {}` rules that used to
+     live here matched nothing whatsoever. Unstyled, each title was a plain
+     inline <a>, so a column of conversations rendered as one run-together
+     paragraph of every title in sequence. :global() matches them; anchoring to
+     .rail — which is in the template, so it *is* scoped — contains it. */
+  .rail :global(.entry),
   .new {
     white-space: nowrap;
     scroll-snap-align: start;
@@ -499,13 +510,13 @@ import NotFound from '../components/NotFound.astro'
     transition: opacity 0.15s ease;
   }
 
-  .rail .entry:hover,
+  .rail :global(.entry:hover),
   .new:hover {
     opacity: 1;
   }
 
   /* The conversation on screen. Not underlined — it is where you already are. */
-  .rail .entry[aria-current='page'] {
+  .rail :global(.entry[aria-current='page']) {
     opacity: 1;
   }
 
@@ -515,6 +526,10 @@ import NotFound from '../components/NotFound.astro'
     background: none;
     border: 0;
     padding: 0;
+    /* Left, not centred: as a stretched flex item in the desktop column a
+       button centres its own label, which put "ny" in the middle of the rail
+       while every title below it started at the edge. */
+    text-align: left;
     cursor: pointer;
   }
 
@@ -531,6 +546,11 @@ import NotFound from '../components/NotFound.astro'
       position: sticky;
       top: 0;
       flex: 0 0 13rem;
+      /* A flex item will not shrink below its content's min-content width, and
+         `nowrap` titles make that the width of the longest one — so the basis
+         above was ignored and the rail grew to fit a whole first sentence,
+         taking the ellipsis with it. This is what makes 13rem mean 13rem. */
+      min-width: 0;
       flex-direction: column;
       align-items: stretch;
       max-height: 100vh;
@@ -554,13 +574,36 @@ import NotFound from '../components/NotFound.astro'
       scrollbar-width: thin;
     }
 
-    .rail .entry {
+    /* One conversation per row. `display: block` is what stacks them; without
+       it they are inline boxes that flow into each other. */
+    .rail :global(.entry) {
       display: block;
+      position: relative;
       /* Titles are as long as the first thing said; the column is not. */
       overflow: hidden;
       text-overflow: ellipsis;
-      padding: 0.15rem 0;
+      /* The left inset holds the marker below. Kept on every row, not just the
+         current one, so the titles do not shift sideways as it moves. */
+      padding: 0.3rem 0 0.3rem 0.85rem;
       font-size: 0.95rem;
+    }
+
+    /* Which one you are in. Opacity alone reads as "slightly less faded" in a
+       list where the row above may be hovered; a mark is unambiguous. */
+    .rail :global(.entry[aria-current='page']::before) {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0.95em;
+      width: 0.28rem;
+      height: 0.28rem;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* Lines up with the titles rather than sitting 0.85rem to their left. */
+    .new {
+      padding-left: 0.85rem;
     }
 
     .content {

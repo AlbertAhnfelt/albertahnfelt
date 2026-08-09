@@ -147,7 +147,9 @@ import NotFound from '../components/NotFound.astro'
           folder = page.folder
           const heading = document.createElement('h2')
           heading.className = 'folder'
-          heading.textContent = folder
+          // A note at the vault root reports no folder at all. It still needs a
+          // label, or its titles read as belonging to whatever group came last.
+          heading.textContent = folder || '/'
           listEl.append(heading)
         }
 
@@ -376,23 +378,40 @@ import NotFound from '../components/NotFound.astro'
     opacity: 0.4;
   }
 
-  .folder {
-    font-size: 0.8rem;
-    letter-spacing: 0.05em;
-    opacity: 0.45;
-    margin: 1.8rem 0 0.5rem;
+  /* Both of these are built with createElement, so they never receive Astro's
+     data-astro-cid-* attribute and the plain `.folder {}` / `.entry {}` rules
+     that used to live here silently matched nothing at all. That is why titles
+     came out at assorted sizes: with no rule reaching them, an <h2> folder took
+     the browser's default heading size and an <a> title took the body size, and
+     the index read as a list of headings with captions. :global() matches them;
+     anchoring to [data-list] — which is in the template, so it *is* scoped —
+     keeps it from leaking into the note body below. */
+
+  /* A folder is a label, not a title. Small, dim and letterspaced so it reads
+     as the thing the titles hang from rather than as one of them. */
+  [data-list] :global(.folder) {
+    font-size: 0.7rem;
+    font-weight: 400;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.35;
+    margin: 2.2rem 0 0.5rem;
   }
 
-  .folder:first-child {
+  [data-list] :global(.folder:first-child) {
     margin-top: 0;
   }
 
-  .entry {
+  /* Every note title, one size — inherited from .vault, so all of them move
+     together with the page's scale and none of them can drift on its own. */
+  [data-list] :global(.entry) {
     display: block;
-    padding: 0.15rem 0;
+    font-size: inherit;
+    line-height: 1.5;
+    padding: 0.3rem 0;
   }
 
-  .entry:hover {
+  [data-list] :global(.entry:hover) {
     text-decoration: underline;
   }
 

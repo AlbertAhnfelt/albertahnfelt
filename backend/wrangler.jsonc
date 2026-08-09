@@ -10,7 +10,20 @@
   "r2_buckets": [
     {
       "binding": "VAULT",
-      "bucket_name": "abbe-vault"
+      "bucket_name": "abbe-vault",
+      // `wrangler dev` otherwise binds a local simulation of this bucket, which
+      // starts empty — so /vault renders whatever test objects happen to be in
+      // .wrangler/state and reads as a vault with four notes in it. There is
+      // nothing useful to develop against there: the point of the vault browser
+      // and of Abbe's grounding is the actual notes.
+      //
+      // The cost is that the write tools — write_page, edit_page, move_page,
+      // delete_page, and the nightly sweep's ai/log/ pages — now reach the real
+      // vault from a local run. `wrangler dev --local` disables remote bindings
+      // and gets the sandbox back when that matters.
+      //
+      // Deploys are unaffected: in production every binding is the real one.
+      "remote": true
     }
   ],
   "d1_databases": [

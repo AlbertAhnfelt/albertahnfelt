@@ -15,15 +15,25 @@ import { isSafeMarkdownKey, listAllKeys, TRASH_PREFIX } from "./vault";
 import { currentSession } from "./web-session";
 
 /**
- * Which roots the browser will show, as an allowlist rather than a denylist.
+ * Scaffolding that is in the bucket but is not notes.
  *
- * The bucket also holds `.claude/`, `.github/`, `scripts/`, `_templates/` and
- * loose files like `CLAUDE.md` — tooling that is not notes. A denylist would
- * have to be updated every time the vault grows a new folder; this fails
- * closed instead, at the cost of a line here when a genuinely new note root
- * appears.
+ * This used to be the other way round — an allowlist of note roots, `["wiki/",
+ * "ai/", "human/", "external/"]` — and it went stale in both directions at
+ * once: `core/` quietly grew four real notes the browser refused to show, while
+ * `external/` was still allowlisted for a folder that no longer exists.
+ *
+ * An allowlist fails closed, which is the right instinct for a boundary. But
+ * this is not the boundary: `handlePage` re-checks every path it is handed, and
+ * the session cookie is what decides whether any of it may be read at all. All
+ * this list does is curate a view of Albert's own vault — and curating it by
+ * hand meant new notes went missing without anything saying so. Inverted, the
+ * failure is a visible one: a folder of scaffolding shows up until it is named
+ * here, rather than a folder of notes silently not existing.
+ *
+ * Hidden directories (`.claude/`, `.github/`, the trash) are excluded
+ * separately, by segment, below.
  */
-const NOTE_ROOTS = ["wiki/", "ai/", "human/", "external/"];
+const TOOLING_PREFIXES = ["_templates/", "scripts/"];
 
 /** Raster only. SVG is a script-carrying document dressed as a picture. */
 const IMAGE_TYPES: Record<string, string> = {
@@ -34,9 +44,6 @@ const IMAGE_TYPES: Record<string, string> = {
   webp: "image/webp",
   avif: "image/avif",
 };
-
-/** Assets may also live outside the note roots, in the vault-wide image dirs. */
-const ASSET_ROOTS = [...NOTE_ROOTS, "images/"];
 
 const CACHE = "private, no-store";
 
@@ -51,19 +58,23 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** A note the browser is allowed to open: a safe .md key under a note root. */
+/** A note the browser is allowed to open: any safe .md key that is not tooling. */
 function isBrowsableNote(key: string): boolean {
+  // Unchanged, and still what stops a path from meaning something other than a
+  // note: relative, no traversal, no NUL, .md only.
   if (!isSafeMarkdownKey(key)) return false;
   if (key.startsWith(TRASH_PREFIX)) return false;
   // Hidden folders anywhere in the path, not just at the root.
   if (key.split("/").some((segment) => segment.startsWith("."))) return false;
-  return NOTE_ROOTS.some((root) => key.startsWith(root));
+  return !TOOLING_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 
 function isBrowsableAsset(key: string): boolean {
   if (key.startsWith("/") || key.includes("\\") || key.includes("\0")) return false;
   if (key.split("/").some((s) => !s || s === "." || s === ".." || s.startsWith("."))) return false;
-  if (!ASSET_ROOTS.some((root) => key.startsWith(root))) return false;
+  if (TOOLING_PREFIXES.some((prefix) => key.startsWith(prefix))) return false;
+  // The real control on this path: a fixed set of raster types, and the
+  // extension decides the one Content-Type the browser is allowed to consider.
   return extension(key) in IMAGE_TYPES;
 }
 
@@ -95,13 +106,32 @@ function byBasename(paths: string[]): Map<string, string> {
 
 async function handleList(env: Cloudflare.Env): Promise<Response> {
   const paths = await noteIndex(env.VAULT);
-  return json({
-    pages: paths.map((path) => ({
+
+  const pages = paths.map((path) => {
+    // A note at the vault root has no slash, and `slice(0, -1)` would hand back
+    // the filename with its last character bitten off — "purpose.m" — as though
+    // that were a folder. Empty is the honest answer; the page labels it.
+    const cut = path.lastIndexOf("/");
+    return {
       path,
       title: basename(path),
-      folder: path.slice(0, path.lastIndexOf("/")),
-    })),
+      folder: cut === -1 ? "" : path.slice(0, cut),
+    };
   });
+
+  // By folder first, then title — not by path, which is what `noteIndex`
+  // returns. For nested notes the two orders agree, because the folder is a
+  // prefix of the path. Root-level notes are where they diverge: their folder
+  // is empty but their path sorts among the folder names, so path order drops
+  // them in the middle of the list and the page, which starts a new group each
+  // time the folder changes, renders a second "/" heading further down. This
+  // way every folder appears exactly once, and the vault's own loose notes come
+  // first rather than wherever their initials happen to land.
+  pages.sort(
+    (a, b) => a.folder.localeCompare(b.folder, "sv") || a.title.localeCompare(b.title, "sv"),
+  );
+
+  return json({ pages });
 }
 
 async function handlePage(request: Request, env: Cloudflare.Env): Promise<Response> {
