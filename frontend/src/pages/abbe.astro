@@ -53,13 +53,24 @@ import NotFound from '../components/NotFound.astro'
 
               <div data-log></div>
 
+              <!-- The mirror is split around the caret rather than being one
+                   span with a cursor stuck on the end, so the block sits where
+                   typing will actually land. aria-hidden because it is a
+                   duplicate of the textarea's own value. -->
               <form class="line me" data-form>
                 <span class="who">Albert</span>
                 <div class="field">
-                  <div class="mirror"><span data-mirror></span><span class="cursor"></span></div>
+                  <div class="mirror" aria-hidden="true"><span data-before
+                    ></span><span class="cursor" data-cursor></span><span
+                    class="sel" data-sel></span><span data-after></span></div>
                   <textarea data-input rows="1" autocomplete="off" spellcheck="false"></textarea>
                 </div>
               </form>
+
+              <!-- Failures belong here, not in the transcript: a line labelled
+                   "Abbe" is something Abbe said, and the stream breaking is
+                   not. Matches how /vault reports the same kind of trouble. -->
+              <p class="status" data-status hidden></p>
             </div>
           </section>
         </div>
@@ -123,11 +134,16 @@ import NotFound from '../components/NotFound.astro'
 
     const form = root.querySelector<HTMLFormElement>('[data-form]')
     const input = root.querySelector<HTMLTextAreaElement>('[data-input]')
-    const mirror = root.querySelector<HTMLElement>('[data-mirror]')
+    const before = root.querySelector<HTMLElement>('[data-before]')
+    const selected = root.querySelector<HTMLElement>('[data-sel]')
+    const after = root.querySelector<HTMLElement>('[data-after]')
+    const cursor = root.querySelector<HTMLElement>('[data-cursor]')
     const log = root.querySelector<HTMLElement>('[data-log]')
+    const statusEl = root.querySelector<HTMLElement>('[data-status]')
     const railList = root.querySelector<HTMLElement>('[data-rail-list]')
     const newButton = root.querySelector<HTMLButtonElement>('[data-new]')
-    if (!form || !input || !mirror || !log || !railList || !newButton) return
+    if (!form || !input || !before || !selected || !after || !cursor) return
+    if (!log || !statusEl || !railList || !newButton) return
 
     // The Worker owns the transcript; this holds only what is on screen. The
     // conversation is identified by its id and nothing is replayed from here.
@@ -136,6 +152,12 @@ import NotFound from '../components/NotFound.astro'
     let pending = false
 
     /* ---------------------------------------------------------- transcript */
+
+    /** Trouble, said in the page's own voice rather than attributed to Abbe. */
+    const status = (message: string | null) => {
+      statusEl.textContent = message ?? ''
+      statusEl.hidden = !message
+    }
 
     const say = (role: 'me' | 'abbe', text: string, partial = false) => {
       const line = document.createElement('div')
@@ -209,7 +231,7 @@ import NotFound from '../components/NotFound.astro'
         }
       } catch {
         log.replaceChildren()
-        say('abbe', '(kunde inte läsa konversationen)')
+        status('kunde inte läsa konversationen.')
       }
     }
 
@@ -221,6 +243,7 @@ import NotFound from '../components/NotFound.astro'
 
       currentId = id
       log.replaceChildren()
+      status(null)
       renderRail()
       if (id) await openChat(id)
       form.scrollIntoView({ block: 'nearest' })
@@ -238,8 +261,26 @@ import NotFound from '../components/NotFound.astro'
     // The textarea's own text is transparent; this mirror is what you actually
     // read, and it carries the block cursor. Both share one grid cell, so the
     // textarea inherits the mirror's height and grows on its own.
+    //
+    // The mirror is drawn in three pieces around the caret. It used to be one
+    // span with the cursor parked after it, which put the block at the end of
+    // the value no matter where the caret really was — so tapping into the
+    // middle of a line left nothing on screen saying where the next character
+    // would go, and you had to type one to find out.
     const sync = () => {
-      mirror.textContent = input.value
+      const value = input.value
+      // Both are nullable on a textarea per the DOM spec, though in practice
+      // only for input types that do not support selection.
+      const start = input.selectionStart ?? value.length
+      const end = input.selectionEnd ?? start
+
+      before.textContent = value.slice(0, start)
+      selected.textContent = value.slice(start, end)
+      after.textContent = value.slice(end)
+
+      // With a range there is no single insertion point to mark, and the
+      // highlight already says what is going to be replaced.
+      cursor.hidden = start !== end
     }
 
     form.addEventListener('submit', async (event) => {
@@ -251,9 +292,21 @@ import NotFound from '../components/NotFound.astro'
       say('me', text)
       input.value = ''
       sync()
+      status(null)
 
+      // readOnly rather than disabled: disabling a focused textarea hands focus
+      // back to the document, and since the caret is drawn from this element's
+      // selection, losing it would take the cursor off screen mid-turn.
       pending = true
-      const row = say('abbe', '(thinking)')
+      input.readOnly = true
+      form.classList.add('busy')
+
+      // Empty, with the streaming class doing the talking — a blinking block
+      // where the answer will appear, rather than the word "(thinking)" sitting
+      // there as though Abbe had said it.
+      const row = say('abbe', '')
+      const line = row.parentElement
+      line?.classList.add('streaming')
       // Captured now: the reply belongs to the conversation that was open when
       // it was asked for, even if something navigates while it streams.
       const asked = currentId
@@ -318,17 +371,36 @@ import NotFound from '../components/NotFound.astro'
         if (!reply) throw new Error('empty')
         if (asked) touch(asked)
       } catch {
-        row.textContent = '(något gick fel)'
-        // The message itself is stored either way — the Worker writes it before
-        // asking the model — so there is nothing to take back here.
+        // Whatever did arrive is kept and marked, because the Worker stores the
+        // fragment too — overwriting it here would leave the page saying
+        // something different from what a reload will show. A turn that
+        // produced nothing at all leaves no Abbe line to explain itself.
+        if (row.textContent) line?.classList.add('partial')
+        else line?.remove()
+        status('något gick fel.')
+        // Albert's own message is stored either way — the Worker writes it
+        // before asking the model — so there is nothing to take back here.
       } finally {
         pending = false
+        input.readOnly = false
+        form.classList.remove('busy')
+        line?.classList.remove('streaming')
         form.scrollIntoView({ block: 'nearest' })
         input.focus()
       }
     })
 
-    input.addEventListener('input', sync)
+    // The caret moves for more reasons than typing: arrow keys, a tap into the
+    // middle of a line, a drag, undo, autocorrect. `selectionchange` covers all
+    // of them on current browsers; the rest are belt for older ones and cost a
+    // repaint of two spans.
+    for (const type of ['input', 'keyup', 'click', 'pointerup', 'select', 'focus'] as const) {
+      input.addEventListener(type, sync)
+    }
+    document.addEventListener('selectionchange', () => {
+      if (document.activeElement === input) sync()
+    })
+
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault()
@@ -520,6 +592,15 @@ import NotFound from '../components/NotFound.astro'
     opacity: 1;
   }
 
+  /* Keyboard only. Without this, tabbing through the rail moves an invisible
+     focus: the hover rule is the only thing that ever lit a row up. */
+  .rail :global(.entry:focus-visible),
+  .new:focus-visible {
+    outline: 1px solid var(--white);
+    outline-offset: 3px;
+    opacity: 1;
+  }
+
   .new {
     font: inherit;
     color: inherit;
@@ -677,6 +758,21 @@ import NotFound from '../components/NotFound.astro'
     opacity: 0.4;
   }
 
+  /* A reply as it arrives: a block riding the last character. This is also what
+     stands in for "(thinking)" before the first token lands — an empty line
+     with a blinking cursor, which is the same thing a terminal does and needs
+     no words. */
+  .term :global(.line.streaming > span:last-child::after) {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1em;
+    margin-left: 0.1em;
+    background: var(--abbe);
+    vertical-align: -0.15em;
+    animation: blink 1.1s steps(1, end) infinite;
+  }
+
   /* Joan ships Regular only, so the browser synthesises this weight. */
   .term :global(.who) {
     font-weight: 700;
@@ -715,6 +811,17 @@ import NotFound from '../components/NotFound.astro'
     outline: none;
   }
 
+  /* The mirror draws the selection. Left alone, the textarea paints its own
+     highlight on top of text that is deliberately invisible, so a selection
+     came out as a bar with nothing in it. */
+  .field textarea::selection {
+    background: transparent;
+  }
+
+  .sel {
+    background: rgba(239, 237, 234, 0.22);
+  }
+
   .cursor {
     display: inline-block;
     width: 0.5em;
@@ -724,9 +831,35 @@ import NotFound from '../components/NotFound.astro'
     animation: blink 1.1s steps(1, end) infinite;
   }
 
+  /* `display: inline-block` above outranks the browser's [hidden] rule, so the
+     block has to be hidden explicitly when a range is selected. */
+  .cursor[hidden] {
+    display: none;
+  }
+
   .field:not(:focus-within) .cursor {
     animation: none;
     opacity: 0.3;
+  }
+
+  /* The prompt while a turn is in flight. Dimmed rather than emptied, and the
+     textarea is only readOnly, so the caret stays exactly where it was. */
+  .term form.busy {
+    opacity: 0.45;
+  }
+
+  /* Aligned with the message column rather than the label column, so it reads
+     as a remark about the conversation and not as another speaker. */
+  .status {
+    margin: 0.25rem 0 0;
+    padding-left: 6.25rem;
+    opacity: 0.55;
+  }
+
+  @media (min-width: 768px) {
+    .status {
+      padding-left: 7rem;
+    }
   }
 
   @keyframes blink {
@@ -736,7 +869,8 @@ import NotFound from '../components/NotFound.astro'
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .cursor {
+    .cursor,
+    .term :global(.line.streaming > span:last-child::after) {
       animation: none;
     }
   }
