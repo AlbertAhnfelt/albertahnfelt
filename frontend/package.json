@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "astro dev",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.mjs\"",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
