@@ -209,5 +209,29 @@ ok("opponent pipe is escaped in the table", chPage.includes("ev\\|il"));
 ok("tally is rendered", chPage.includes("1W / 1D / 0L"));
 check("pgn concatenates both games", pgnFor(chEvents).split("[Event").length, 3);
 
+
+// A long history, to pin the cursor rule. Regression: the cursor used to be the
+// furthest month of everything read, which includes the always-fetched current
+// month — so a first run jumped to today having read only the oldest twelve
+// archives, and stranded every month in between for good.
+console.log("\nchess backfill:");
+const many = [];
+for (let year = 2018; year <= 2026; year++) {
+  for (let m = 1; m <= 12; m++) {
+    if (year === 2026 && m > 8) break;
+    many.push(`https://api.chess.com/pub/player/albert/games/${year}/${String(m).padStart(2, "0")}`);
+  }
+}
+stubFetch({
+  "https://api.chess.com/pub/player/albert/games/archives": JSON.stringify({ archives: many }),
+  "https://api.chess.com/pub/player/albert/games/": GAMES,
+});
+const first = await chess.fetch({ CHESS_USERNAME: "Albert" } as never, null);
+check("first run stops at the twelfth archive, not today", first.cursor, "2018-12");
+const second = await chess.fetch({ CHESS_USERNAME: "Albert" } as never, first.cursor as string);
+check("the next run carries on from there", second.cursor, "2019-12");
+const caught = await chess.fetch({ CHESS_USERNAME: "Albert" } as never, "2026-08");
+check("a caught-up run leaves the cursor alone", caught.cursor, null);
+
 console.log(failures === 0 ? "\nall passed\n" : `\n${failures} FAILED\n`);
 if (failures > 0) throw new Error(`${failures} smoke check(s) failed`);

@@ -196,23 +196,39 @@ export const chess: Connector = {
     // Everything after the last archive this connector finished, plus the
     // current month unconditionally — that one is never "finished" while the
     // month is still going, and re-reading it is what picks up today's games.
+    // The next slice of history, oldest first. Everything after the last month
+    // this connector finished, capped so a first run does not try to read ten
+    // years in one invocation.
     const after = cursor ? all.filter((url) => (monthFromArchiveUrl(url) ?? "") > cursor) : all;
-    const todo = [...new Set([...after.slice(0, MAX_ARCHIVES_PER_RUN), latest])].sort();
+    const backfill = after.slice(0, MAX_ARCHIVES_PER_RUN);
+
+    // Plus the current month unconditionally: it is never "finished" while the
+    // month is still going, and re-reading it is what picks up today's games.
+    const todo = [...new Set([...backfill, latest])].sort();
 
     const events: RawEvent[] = [];
-    let furthest = cursor ?? "";
-
     for (const url of todo) {
       const { games } = await getJson<{ games?: ApiGame[] }>(url);
       for (const game of games ?? []) {
         const event = toEvent(game, env.CHESS_USERNAME);
         if (event) events.push(event);
       }
-      const month = monthFromArchiveUrl(url);
-      if (month && month > furthest) furthest = month;
     }
 
-    return { events, cursor: furthest || null };
+    // The cursor may only advance across `backfill`, which is contiguous. It
+    // must never account for `latest`.
+    //
+    // Taking the furthest month of everything read looks equivalent and is not:
+    // `latest` is the current month, so the first run would set the cursor to
+    // today having actually read twelve archives from 2018. From then on
+    // `after` is empty, the backfill has nothing to do, and every month in
+    // between is stranded for good — a gap that looks like an account with no
+    // games in it rather than like a bug.
+    const completed =
+      backfill.length > 0 ? monthFromArchiveUrl(backfill[backfill.length - 1]) : null;
+
+    // null leaves the stored cursor alone, which is what a caught-up run wants.
+    return { events, cursor: completed };
   },
 
   renderMonth(month, events) {
