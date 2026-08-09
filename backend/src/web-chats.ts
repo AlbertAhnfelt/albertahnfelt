@@ -11,7 +11,7 @@
  * belonging to nobody.
  */
 
-import { getConversation, getMessages, listConversations } from "./chats";
+import { getConversation, getMessages, getToolCalls, listConversations } from "./chats";
 import { currentSession } from "./web-session";
 
 function json(body: unknown, status = 200): Response {
@@ -57,5 +57,12 @@ export async function handleChats(request: Request, env: Cloudflare.Env): Promis
   const conversation = await getConversation(env.DB, session.email, id);
   if (!conversation) return json({ error: "not found" }, 404);
 
-  return json({ ...conversation, messages: await getMessages(env.DB, conversation.id) });
+  // Both reads take an id this session is now known to own. The tool rows are
+  // what let a reload show the same trace the live stream showed.
+  const [messages, tools] = await Promise.all([
+    getMessages(env.DB, conversation.id),
+    getToolCalls(env.DB, conversation.id),
+  ]);
+
+  return json({ ...conversation, messages, tools });
 }

@@ -39,6 +39,8 @@ export type ChatSummary = {
 };
 
 export type StoredMessage = {
+  /** Needed to hang tool rows off the reply they led to. */
+  id: number;
   role: "user" | "model";
   text: string;
   created_at: number;
@@ -54,6 +56,52 @@ export type ToolRecord = {
   ok: boolean;
   durationMs: number;
 };
+
+/**
+ * A stored tool call as the page is allowed to see it: what was called, on what,
+ * whether it worked and how long it took. Deliberately without `result` — a
+ * read_page result is an entire vault page, and none of it belongs in a trace.
+ */
+export type StoredTool = {
+  message_id: number | null;
+  round: number;
+  name: string;
+  detail: string;
+  ok: boolean;
+  duration_ms: number | null;
+};
+
+/** Longest one-line label derived from a tool's arguments. */
+const MAX_DETAIL_CHARS = 80;
+
+/**
+ * The argument that says what a call touched, as one short line.
+ *
+ * Accepts either the live object from the chat loop or the JSON string as it was
+ * stored, so both producers get the same label. Whatever comes back is
+ * model-generated text and is only ever written to the DOM with textContent.
+ */
+export function toolDetail(args: unknown): string {
+  let parsed: unknown = args;
+  if (typeof args === "string") {
+    try {
+      parsed = JSON.parse(args);
+    } catch {
+      return "";
+    }
+  }
+  if (typeof parsed !== "object" || parsed === null) return "";
+
+  // In the order that says most about the call. `prefix` last: it is the one
+  // argument that is meaningfully empty, meaning the vault root.
+  for (const key of ["path", "query", "from", "titleSlug", "title", "prefix"]) {
+    const value = (parsed as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.replace(/\s+/g, " ").trim().slice(0, MAX_DETAIL_CHARS);
+    }
+  }
+  return "";
+}
 
 /** The shape a minted id has. Anything else never reaches a query. */
 export function isConversationId(value: string): boolean {
@@ -129,12 +177,52 @@ export async function getConversation(
 export async function getMessages(db: D1Database, id: string): Promise<StoredMessage[]> {
   const { results } = await db
     .prepare(
-      `SELECT role, text, created_at, partial FROM messages
+      `SELECT id, role, text, created_at, partial FROM messages
        WHERE conversation_id = ?1 ORDER BY seq ASC`,
     )
     .bind(id)
-    .all<{ role: "user" | "model"; text: string; created_at: number; partial: number }>();
+    .all<{
+      id: number;
+      role: "user" | "model";
+      text: string;
+      created_at: number;
+      partial: number;
+    }>();
   return results.map((row) => ({ ...row, partial: row.partial === 1 }));
+}
+
+/**
+ * The tool calls behind a conversation's replies, oldest first.
+ *
+ * Same contract as `getMessages`: takes an id whose ownership `getConversation`
+ * has already established, and the two are only ever called as a set. `result`
+ * is not selected, and `args` is reduced to a one-line label rather than handed
+ * back as stored.
+ */
+export async function getToolCalls(db: D1Database, id: string): Promise<StoredTool[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT message_id, round, name, args, ok, duration_ms FROM tool_calls
+       WHERE conversation_id = ?1 ORDER BY message_id ASC, round ASC, id ASC`,
+    )
+    .bind(id)
+    .all<{
+      message_id: number | null;
+      round: number;
+      name: string;
+      args: string | null;
+      ok: number;
+      duration_ms: number | null;
+    }>();
+
+  return results.map((row) => ({
+    message_id: row.message_id,
+    round: row.round,
+    name: row.name,
+    detail: toolDetail(row.args),
+    ok: row.ok === 1,
+    duration_ms: row.duration_ms,
+  }));
 }
 
 /**

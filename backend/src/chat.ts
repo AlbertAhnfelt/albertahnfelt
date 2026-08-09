@@ -23,6 +23,7 @@ import {
   getConversation,
   getMessages,
   isConversationId,
+  toolDetail,
   windowFor,
 } from "./chats";
 import {
@@ -257,6 +258,20 @@ export async function handleChat(
             result: results[i].output,
             ok: results[i].ok,
             durationMs: results[i].durationMs,
+          });
+
+          // Told to the page as well as stored, so it can show what the vault
+          // was asked while the answer is still being written. `detail` is the
+          // one argument that says what was touched — never the result, which
+          // for read_page is an entire page.
+          await send({
+            tool: {
+              round,
+              name: call.name,
+              detail: toolDetail(call.args ?? {}),
+              ok: results[i].ok,
+              ms: results[i].durationMs,
+            },
           });
         }
 
