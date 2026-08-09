@@ -51,6 +51,10 @@ import NotFound from '../components/NotFound.astro'
             <div class="term">
               <h1>Abbe.</h1>
 
+              <!-- One dim system line: who is answering and how much history
+                   there is. Filled once the session and the rail are known. -->
+              <p class="boot" data-boot></p>
+
               <div data-log></div>
 
               <!-- The mirror is split around the caret rather than being one
@@ -62,10 +66,15 @@ import NotFound from '../components/NotFound.astro'
                 <div class="field">
                   <div class="mirror" aria-hidden="true"><span data-before
                     ></span><span class="cursor" data-cursor></span><span
-                    class="sel" data-sel></span><span data-after></span></div>
+                    class="sel" data-sel></span><span data-after></span><span
+                    class="ghost" data-ghost></span></div>
                   <textarea data-input rows="1" autocomplete="off" spellcheck="false"></textarea>
                 </div>
               </form>
+
+              <!-- Live state: the spinner, how long it has been going, and how
+                   to stop it. Only present while a turn is in flight. -->
+              <p class="bar" data-bar hidden></p>
 
               <!-- Failures belong here, not in the transcript: a line labelled
                    "Abbe" is something Abbe said, and the stream breaking is
@@ -86,12 +95,42 @@ import NotFound from '../components/NotFound.astro'
   type ChatSummary = { id: string; title: string; updated_at: number }
 
   /** One stored turn, as /web/chats/:id returns it. */
-  type StoredMessage = { role: 'user' | 'model'; text: string; partial: boolean }
+  type StoredMessage = {
+    id: number
+    role: 'user' | 'model'
+    text: string
+    created_at: number
+    partial: boolean
+  }
+
+  /**
+   * A tool call. The same shape arrives two ways — live on the chat stream and
+   * stored on a transcript — which is why `message_id` is optional: live, the
+   * reply it belongs to does not have an id yet.
+   */
+  type ToolEvent = {
+    name: string
+    detail: string
+    ok: boolean
+    ms: number | null
+    message_id?: number | null
+  }
+
+  /** A vault page, as /web/vault/pages lists it. Used by /valv. */
+  type VaultPage = { path: string; title: string; folder: string }
 
   const API = '/api/abbe/web'
 
   /** The shape the Worker mints. Anything else is not a conversation id. */
   const ID = /^[0-9a-f]{64}$/
+
+  /**
+   * Which model is answering, from /web/me. The page paints optimistically from
+   * the hint cookie, so the chat is wired up before this is known — hence the
+   * callback: whoever is showing the system line gets told to redraw it.
+   */
+  let model: string | null = null
+  let redrawBoot: (() => void) | null = null
 
   /**
    * Which block is real. One flag on <html>, set here and by Layout's head
@@ -132,24 +171,47 @@ import NotFound from '../components/NotFound.astro'
     if (root.dataset.chat) return
     root.dataset.chat = '1'
 
+    const term = root.querySelector<HTMLElement>('.term')
     const form = root.querySelector<HTMLFormElement>('[data-form]')
     const input = root.querySelector<HTMLTextAreaElement>('[data-input]')
     const before = root.querySelector<HTMLElement>('[data-before]')
     const selected = root.querySelector<HTMLElement>('[data-sel]')
     const after = root.querySelector<HTMLElement>('[data-after]')
+    const ghost = root.querySelector<HTMLElement>('[data-ghost]')
     const cursor = root.querySelector<HTMLElement>('[data-cursor]')
     const log = root.querySelector<HTMLElement>('[data-log]')
     const statusEl = root.querySelector<HTMLElement>('[data-status]')
+    const barEl = root.querySelector<HTMLElement>('[data-bar]')
+    const bootEl = root.querySelector<HTMLElement>('[data-boot]')
     const railList = root.querySelector<HTMLElement>('[data-rail-list]')
     const newButton = root.querySelector<HTMLButtonElement>('[data-new]')
-    if (!form || !input || !before || !selected || !after || !cursor) return
-    if (!log || !statusEl || !railList || !newButton) return
+    if (!term || !form || !input || !before || !selected || !after || !ghost) return
+    if (!cursor || !log || !statusEl || !barEl || !bootEl || !railList || !newButton) return
 
     // The Worker owns the transcript; this holds only what is on screen. The
     // conversation is identified by its id and nothing is replayed from here.
     let chats: ChatSummary[] = []
     let currentId: string | null = null
     let pending = false
+
+    /**
+     * Interrupting a turn. The controller only stops *this* side reading: the
+     * Worker runs the turn under waitUntil and stores whatever it generated, so
+     * an abort leaves the screen and the stored transcript agreeing.
+     */
+    let controller: AbortController | null = null
+    let aborted = false
+
+    /** Recall, ↑/↓. Seeded from the transcript, so it survives a reload. */
+    let past: string[] = []
+    let pastAt: number | null = null
+    let draft = ''
+
+    /** Whether the tool trace is shown. A class on .term does the showing. */
+    let verbose = false
+
+    /** Titles for /valv, fetched once and only if asked for. */
+    let vaultPages: VaultPage[] | null = null
 
     /* ---------------------------------------------------------- transcript */
 
@@ -159,14 +221,28 @@ import NotFound from '../components/NotFound.astro'
       statusEl.hidden = !message
     }
 
-    const say = (role: 'me' | 'abbe', text: string, partial = false) => {
+    const clock = (at: number) =>
+      new Date(at).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })
+
+    const say = (
+      role: 'me' | 'abbe',
+      text: string,
+      opts: { partial?: boolean; at?: number } = {},
+    ) => {
       const line = document.createElement('div')
       // Role lives on the row, not the label: it colours the whole line.
-      line.className = `line ${role}${partial ? ' partial' : ''}`
+      line.className = `line ${role}${opts.partial ? ' partial' : ''}`
 
       const who = document.createElement('span')
       who.className = 'who'
       who.textContent = role === 'me' ? 'Albert' : 'Abbe'
+
+      // Under the name rather than in a column of its own: it buys the density a
+      // transcript wants without taking width from the message on a phone.
+      const at = document.createElement('span')
+      at.className = 'at'
+      at.textContent = clock(opts.at ?? Date.now())
+      who.append(at)
 
       const body = document.createElement('span')
       // textContent, never innerHTML: replies carry vault text via a model.
@@ -175,9 +251,119 @@ import NotFound from '../components/NotFound.astro'
       line.append(who, body)
       log.append(line)
       form.scrollIntoView({ block: 'nearest' })
-      // Returned so a pending row can be rewritten in place once it answers.
-      return body
+      // Both, because a streaming row is rewritten through `body` while the
+      // class that marks it lives on `line`.
+      return { line, body }
     }
+
+    /**
+     * One tool call, as a dim single line. Always put in the DOM; whether it is
+     * visible is `.term.verbose`, so /verbose costs no re-render and reveals the
+     * calls behind replies that are already on screen.
+     *
+     * `name` and `detail` are model-generated — textContent, as everywhere.
+     */
+    const trace = (event: ToolEvent, mark?: Element | null) => {
+      const row = document.createElement('div')
+      row.className = `trace${event.ok ? '' : ' failed'}`
+
+      const name = document.createElement('span')
+      name.className = 'tname'
+      name.textContent = event.name
+
+      const detail = document.createElement('span')
+      detail.className = 'tdetail'
+      detail.textContent = event.detail
+
+      const took = document.createElement('span')
+      took.className = 'tms'
+      took.textContent = event.ms === null ? '' : `${event.ms} ms`
+
+      row.append(name, detail, took)
+      // Tools ran before the answer they produced, so they are printed above it.
+      if (mark) log.insertBefore(row, mark)
+      else log.append(row)
+      return row
+    }
+
+    /**
+     * The terminal talking about itself: help, search results, notices. A pair
+     * per row, laid out as a grid — the site's face is proportional, so columns
+     * cannot be faked with padded spaces.
+     */
+    const sys = (heading: string, rows: [string, string | Node][]) => {
+      const block = document.createElement('div')
+      block.className = 'sys'
+
+      const title = document.createElement('div')
+      title.className = 'sysh'
+      title.textContent = heading
+      block.append(title)
+
+      for (const [key, value] of rows) {
+        const k = document.createElement('span')
+        k.className = 'sysk'
+        k.textContent = key
+
+        const v = document.createElement('span')
+        v.className = 'sysv'
+        if (typeof value === 'string') v.textContent = value
+        else v.append(value)
+
+        block.append(k, v)
+      }
+
+      log.append(block)
+      form.scrollIntoView({ block: 'nearest' })
+      return block
+    }
+
+    /* --------------------------------------------------------- live status */
+
+    /** Braille, because it turns in place instead of jittering the line width. */
+    const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+
+    /** Past this many seconds the spinner warms, to say it is still working. */
+    const SLOW_AFTER_S = 10
+
+    let spinner: number | null = null
+
+    const bar = (text: string | null) => {
+      barEl.textContent = text ?? ''
+      barEl.hidden = !text
+    }
+
+    const startSpinner = () => {
+      const began = Date.now()
+      let frame = 0
+
+      const tick = () => {
+        const seconds = Math.floor((Date.now() - began) / 1000)
+        barEl.classList.toggle('slow', seconds >= SLOW_AFTER_S)
+        bar(`${FRAMES[frame++ % FRAMES.length]}  tänker… ${seconds}s  ·  esc avbryter`)
+      }
+
+      tick()
+      spinner = window.setInterval(tick, 120)
+    }
+
+    const stopSpinner = () => {
+      if (spinner !== null) window.clearInterval(spinner)
+      spinner = null
+      barEl.classList.remove('slow')
+      bar(null)
+    }
+
+    /** The system line under the heading. Redrawn when /web/me names the model. */
+    const boot = () => {
+      const parts = ['abbe']
+      if (model) parts.push(model)
+      parts.push(chats.length === 1 ? '1 konversation' : `${chats.length} konversationer`)
+      if (verbose) parts.push('verbose')
+      bootEl.textContent = parts.join('   ·   ')
+    }
+
+    redrawBoot = boot
 
     /* -------------------------------------------------------------- history */
 
@@ -203,6 +389,7 @@ import NotFound from '../components/NotFound.astro'
         if (!res.ok) return
         chats = ((await res.json()) as { chats: ChatSummary[] }).chats
         renderRail()
+        boot()
       } catch {
         // A rail that failed to load is a rail that is empty. The chat itself
         // does not depend on it, so there is nothing to say about this.
@@ -224,10 +411,34 @@ import NotFound from '../components/NotFound.astro'
       try {
         const res = await fetch(`${API}/chats/${id}`, { headers: { accept: 'application/json' } })
         if (!res.ok) throw new Error(String(res.status))
-        const { messages } = (await res.json()) as { messages: StoredMessage[] }
+        const { messages, tools } = (await res.json()) as {
+          messages: StoredMessage[]
+          tools?: ToolEvent[]
+        }
+
+        // Grouped by the reply each round of calls led to, so the trace can be
+        // printed where it happened rather than in a heap at the end.
+        const byMessage = new Map<number, ToolEvent[]>()
+        for (const event of tools ?? []) {
+          if (event.message_id == null) continue
+          const list = byMessage.get(event.message_id)
+          if (list) list.push(event)
+          else byMessage.set(event.message_id, [event])
+        }
+
         log.replaceChildren()
+        past = []
+        pastAt = null
+
         for (const message of messages) {
-          say(message.role === 'user' ? 'me' : 'abbe', message.text, message.partial)
+          for (const event of byMessage.get(message.id) ?? []) trace(event)
+          say(message.role === 'user' ? 'me' : 'abbe', message.text, {
+            partial: message.partial,
+            at: message.created_at,
+          })
+          // What ↑ walks back through. Seeded from the transcript, so recall
+          // works on a conversation this tab has never spoken in.
+          if (message.role === 'user') past.push(message.text)
         }
       } catch {
         log.replaceChildren()
@@ -244,6 +455,10 @@ import NotFound from '../components/NotFound.astro'
       currentId = id
       log.replaceChildren()
       status(null)
+      // A fresh conversation has nothing to recall, and carrying the previous
+      // one's messages over would put words in this one's history.
+      past = []
+      pastAt = null
       renderRail()
       if (id) await openChat(id)
       form.scrollIntoView({ block: 'nearest' })
@@ -254,6 +469,128 @@ import NotFound from '../components/NotFound.astro'
       window.history.pushState({}, '', '/abbe')
       void route()
       input.focus()
+    }
+
+    /* ------------------------------------------------------------ commands */
+
+    const clearScreen = () => {
+      log.replaceChildren()
+      status(null)
+      form.scrollIntoView({ block: 'nearest' })
+    }
+
+    const setVerbose = (on: boolean) => {
+      verbose = on
+      term.classList.toggle('verbose', on)
+      boot()
+      try {
+        window.localStorage.setItem('abbe:verbose', on ? '1' : '0')
+      } catch {
+        // Private browsing, or storage full. The toggle still works for this
+        // page; it just will not be remembered.
+      }
+    }
+
+    /** Titles only, and only fetched the first time /valv is used. */
+    const vaultSearch = async (query: string) => {
+      const q = query.trim().toLowerCase()
+      if (!q) {
+        sys('valv', [['/valv', 'ange en sökfras, t.ex. /valv loggning']])
+        return
+      }
+
+      if (!vaultPages) {
+        try {
+          const res = await fetch(`${API}/vault/pages`, {
+            headers: { accept: 'application/json' },
+          })
+          if (!res.ok) throw new Error(String(res.status))
+          vaultPages = ((await res.json()) as { pages: VaultPage[] }).pages
+        } catch {
+          status('kunde inte läsa valvet.')
+          return
+        }
+      }
+
+      const hits = vaultPages
+        .filter((p) => p.title.toLowerCase().includes(q) || p.folder.toLowerCase().includes(q))
+        .slice(0, 12)
+
+      if (hits.length === 0) {
+        sys(`valv · ${q}`, [['', 'inga träffar.']])
+        return
+      }
+
+      sys(`valv · ${hits.length} träffar`, [
+        ...hits.map((page): [string, Node] => {
+          const link = document.createElement('a')
+          link.href = `/vault/${page.path.split('/').map(encodeURIComponent).join('/')}`
+          // textContent, never innerHTML: a title is a vault filename.
+          link.textContent = page.title
+          return [page.folder || '/', link]
+        }),
+      ])
+    }
+
+    type Command = {
+      name: string
+      /** Shown as a ghost once the name is complete, e.g. `/valv <fras>`. */
+      arg?: string
+      aliases?: string[]
+      help: string
+      run: (rest: string) => void | Promise<void>
+    }
+
+    const COMMANDS: Command[] = [
+      { name: '/ny', aliases: ['/new'], help: 'börja en ny konversation', run: () => startNew() },
+      {
+        name: '/rensa',
+        aliases: ['/clear'],
+        help: 'rensa rutan — ctrl+l gör samma sak',
+        run: () => clearScreen(),
+      },
+      { name: '/valv', arg: '<fras>', help: 'sök titlar i valvet', run: (rest) => vaultSearch(rest) },
+      {
+        name: '/verbose',
+        help: 'visa eller göm verktygsanrop',
+        run: () => setVerbose(!verbose),
+      },
+      { name: '/hjälp', aliases: ['/help', '/?'], help: 'den här listan', run: () => showHelp() },
+    ]
+
+    function showHelp() {
+      sys('kommandon', [
+        ...COMMANDS.map((c): [string, string] => [
+          c.arg ? `${c.name} ${c.arg}` : c.name,
+          c.help,
+        ]),
+      ])
+      sys('tangenter', [
+        ['↑ ↓', 'tidigare meddelanden'],
+        ['tab', 'fyll i kommandot'],
+        ['esc', 'avbryt ett svar som skrivs'],
+        ['ctrl+l', 'rensa rutan'],
+        ['skift+enter', 'ny rad'],
+      ])
+    }
+
+    /** The command a line names, if any. Matched on the first word only. */
+    const commandFor = (text: string): { command: Command; rest: string } | null => {
+      const space = text.indexOf(' ')
+      const head = (space === -1 ? text : text.slice(0, space)).toLowerCase()
+      const rest = space === -1 ? '' : text.slice(space + 1)
+      const command = COMMANDS.find((c) => c.name === head || c.aliases?.includes(head))
+      return command ? { command, rest } : null
+    }
+
+    const runCommand = async (text: string) => {
+      const found = commandFor(text)
+      if (!found) {
+        status(`okänt kommando: ${text.split(' ')[0]} — /hjälp visar listan.`)
+        return
+      }
+      status(null)
+      await found.command.run(found.rest)
     }
 
     /* --------------------------------------------------------------- input */
@@ -281,6 +618,36 @@ import NotFound from '../components/NotFound.astro'
       // With a range there is no single insertion point to mark, and the
       // highlight already says what is going to be replaced.
       cursor.hidden = start !== end
+
+      ghost.textContent = completion(value, start === end && end === value.length)
+    }
+
+    /**
+     * The dim rest of the command being typed, or ''.
+     *
+     * Only with the caret at the very end — a suggestion trailing text you are
+     * editing in the middle of is noise — and only when exactly one command
+     * matches, because a ghost that guesses between two is worse than none.
+     * Once the name is complete it becomes the argument hint instead.
+     */
+    const completion = (value: string, atEnd: boolean): string => {
+      if (!atEnd || !value.startsWith('/')) return ''
+
+      const exact = COMMANDS.find((c) => c.name === value.toLowerCase())
+      if (exact) return exact.arg ? ` ${exact.arg}` : ''
+
+      // A space means the name is settled and we are into arguments.
+      if (value.includes(' ')) return ''
+
+      const matches = COMMANDS.filter((c) => c.name.startsWith(value.toLowerCase()))
+      return matches.length === 1 ? matches[0].name.slice(value.length) : ''
+    }
+
+    /** Replace the whole line and put the caret at the end, as recall does. */
+    const setValue = (value: string) => {
+      input.value = value
+      input.setSelectionRange(value.length, value.length)
+      sync()
     }
 
     form.addEventListener('submit', async (event) => {
@@ -288,6 +655,21 @@ import NotFound from '../components/NotFound.astro'
 
       const text = input.value.trim()
       if (!text || pending) return
+
+      // Recall holds everything typed at this prompt, commands included — they
+      // are the lines most worth getting back without retyping.
+      past.push(text)
+      pastAt = null
+      draft = ''
+
+      // A command never reaches the Worker and never becomes a turn: it is the
+      // terminal talking to itself.
+      if (text.startsWith('/')) {
+        input.value = ''
+        sync()
+        await runCommand(text)
+        return
+      }
 
       say('me', text)
       input.value = ''
@@ -300,13 +682,15 @@ import NotFound from '../components/NotFound.astro'
       pending = true
       input.readOnly = true
       form.classList.add('busy')
+      aborted = false
+      controller = new AbortController()
+      startSpinner()
 
       // Empty, with the streaming class doing the talking — a blinking block
       // where the answer will appear, rather than the word "(thinking)" sitting
       // there as though Abbe had said it.
-      const row = say('abbe', '')
-      const line = row.parentElement
-      line?.classList.add('streaming')
+      const { line, body: row } = say('abbe', '')
+      line.classList.add('streaming')
       // Captured now: the reply belongs to the conversation that was open when
       // it was asked for, even if something navigates while it streams.
       const asked = currentId
@@ -319,6 +703,7 @@ import NotFound from '../components/NotFound.astro'
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ conversation_id: asked, text }),
+          signal: controller.signal,
         })
         if (!res.ok || !res.body) throw new Error(String(res.status))
 
@@ -337,15 +722,26 @@ import NotFound from '../components/NotFound.astro'
           const lines = buffer.split('\n')
           buffer = lines.pop() ?? ''
 
-          for (const line of lines) {
-            if (!line.trim()) continue
-            const event = JSON.parse(line) as {
+          // `chunk`, not `line` — the reply's own row is named that in this
+          // scope, and shadowing it here is how you edit the wrong thing.
+          for (const chunk of lines) {
+            if (!chunk.trim()) continue
+            const event = JSON.parse(chunk) as {
               conversation?: { id: string; title: string }
+              tool?: ToolEvent
               delta?: string
               done?: boolean
               error?: string
             }
             if (event.error) throw new Error(event.error)
+
+            // Printed above the reply, where it happened. Hidden unless
+            // /verbose, but written into the DOM either way so turning it on
+            // reveals the calls behind answers already on screen.
+            if (event.tool) {
+              trace(event.tool, line)
+              continue
+            }
 
             // First line of every stream. On a fresh conversation this is how
             // the page learns the id the Worker minted, and the URL becomes
@@ -375,16 +771,22 @@ import NotFound from '../components/NotFound.astro'
         // fragment too — overwriting it here would leave the page saying
         // something different from what a reload will show. A turn that
         // produced nothing at all leaves no Abbe line to explain itself.
-        if (row.textContent) line?.classList.add('partial')
-        else line?.remove()
-        status('något gick fel.')
+        if (row.textContent) line.classList.add('partial')
+        else line.remove()
+
+        // An interruption is not a failure. The Worker keeps going under
+        // waitUntil and stores what it made, so this says what happened rather
+        // than blaming something — and a reload will show the same fragment.
+        status(aborted ? 'avbruten.' : 'något gick fel.')
         // Albert's own message is stored either way — the Worker writes it
         // before asking the model — so there is nothing to take back here.
       } finally {
         pending = false
+        controller = null
         input.readOnly = false
         form.classList.remove('busy')
-        line?.classList.remove('streaming')
+        line.classList.remove('streaming')
+        stopSpinner()
         form.scrollIntoView({ block: 'nearest' })
         input.focus()
       }
@@ -402,6 +804,67 @@ import NotFound from '../components/NotFound.astro'
     })
 
     input.addEventListener('keydown', (event) => {
+      // First, because it is the one key that has to work while the prompt is
+      // read-only and everything below is refusing input.
+      if (event.key === 'Escape') {
+        if (!controller) return
+        event.preventDefault()
+        aborted = true
+        controller.abort()
+        return
+      }
+
+      if (event.key.toLowerCase() === 'l' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault()
+        clearScreen()
+        return
+      }
+
+      if (event.key === 'Tab' && ghost.textContent) {
+        event.preventDefault()
+        // The argument hint is a label, not text to insert — completing `/valv`
+        // should leave you ready to type the phrase, not the word "<fras>".
+        const rest = ghost.textContent.trim().startsWith('<') ? ' ' : ghost.textContent
+        setValue(input.value + rest)
+        return
+      }
+
+      // Recall only from the edge of the text, so arrows still move within a
+      // message that happens to span several lines.
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        const caret = input.selectionStart ?? 0
+        const up = event.key === 'ArrowUp'
+        const atEdge = up
+          ? !input.value.slice(0, caret).includes('\n')
+          : !input.value.slice(input.selectionEnd ?? caret).includes('\n')
+        if (!atEdge) return
+
+        if (up) {
+          if (past.length === 0) return
+          event.preventDefault()
+          // Stepping in for the first time: keep whatever was half-typed, so
+          // coming back down returns it rather than an empty line.
+          if (pastAt === null) {
+            draft = input.value
+            pastAt = past.length
+          }
+          pastAt = Math.max(0, pastAt - 1)
+          setValue(past[pastAt])
+          return
+        }
+
+        if (pastAt === null) return
+        event.preventDefault()
+        pastAt += 1
+        if (pastAt >= past.length) {
+          pastAt = null
+          setValue(draft)
+        } else {
+          setValue(past[pastAt])
+        }
+        return
+      }
+
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault()
         form.requestSubmit()
@@ -434,7 +897,16 @@ import NotFound from '../components/NotFound.astro'
 
     window.addEventListener('popstate', () => void route())
 
+    // Remembered across loads, because it is a preference about how much you
+    // want to see rather than state belonging to a conversation.
+    try {
+      setVerbose(window.localStorage.getItem('abbe:verbose') === '1')
+    } catch {
+      setVerbose(false)
+    }
+
     sync()
+    boot()
     void route()
     void loadChats()
     input.focus()
@@ -475,7 +947,14 @@ import NotFound from '../components/NotFound.astro'
       const res = await fetch(`${API}/me`, { headers: { accept: 'application/json' } })
       if (!res.ok) return signedOut()
 
+      // Which model is answering. Known only now, whereas the chat was wired up
+      // from the hint cookie a moment ago — so the system line is told to
+      // redraw rather than being built with a gap in it.
+      const me = (await res.json()) as { model?: string }
+      if (typeof me.model === 'string') model = me.model
+
       signedIn(root)
+      redrawBoot?.()
     } catch {
       // Offline, or the Worker is down. Whatever is on screen stays: a dropped
       // request is not evidence about the session, and there is nothing on this
@@ -770,12 +1249,23 @@ import NotFound from '../components/NotFound.astro'
     margin-left: 0.1em;
     background: var(--abbe);
     vertical-align: -0.15em;
-    animation: blink 1.1s steps(1, end) infinite;
+    animation: blink 1s steps(1, end) infinite;
   }
 
   /* Joan ships Regular only, so the browser synthesises this weight. */
   .term :global(.who) {
     font-weight: 700;
+  }
+
+  /* The time, under the name. In the label column it costs no width from the
+     message, which is what matters on a phone. */
+  .term :global(.who .at) {
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.3;
   }
 
   .field {
@@ -822,13 +1312,19 @@ import NotFound from '../components/NotFound.astro'
     background: rgba(239, 237, 234, 0.22);
   }
 
+  /* The rest of the command being typed. Dim enough to read as a suggestion
+     rather than as something you already wrote. */
+  .ghost {
+    opacity: 0.28;
+  }
+
   .cursor {
     display: inline-block;
     width: 0.5em;
     height: 1em;
     background: var(--white);
     vertical-align: -0.15em;
-    animation: blink 1.1s steps(1, end) infinite;
+    animation: blink 1s steps(1, end) infinite;
   }
 
   /* `display: inline-block` above outranks the browser's [hidden] rule, so the
@@ -848,17 +1344,129 @@ import NotFound from '../components/NotFound.astro'
     opacity: 0.45;
   }
 
-  /* Aligned with the message column rather than the label column, so it reads
-     as a remark about the conversation and not as another speaker. */
-  .status {
+  /* Aligned with the message column rather than the label column, so both read
+     as remarks about the conversation and not as another speaker. */
+  .status,
+  .bar {
     margin: 0.25rem 0 0;
     padding-left: 6.25rem;
     opacity: 0.55;
   }
 
+  .bar {
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Past ten seconds. Not an error — the opposite: it is the line saying it is
+     still working, which is the moment you start to wonder. */
+  .bar.slow {
+    color: #d9a15b;
+    opacity: 0.85;
+  }
+
   @media (min-width: 768px) {
-    .status {
+    .status,
+    .bar {
       padding-left: 7rem;
+    }
+  }
+
+  /* The system line under the heading: who is answering, how much history. */
+  .boot {
+    margin: -1.75rem 0 2.5rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    opacity: 0.3;
+  }
+
+  .boot:empty {
+    display: none;
+  }
+
+  /* ---------------------------------------------------- the tool trace */
+
+  /* Every call is written into the transcript; only .verbose shows them. That
+     way turning it on reveals the calls behind replies already on screen
+     instead of only applying to the next question. */
+  .term :global(.trace) {
+    display: none;
+  }
+
+  .term.verbose :global(.trace) {
+    display: grid;
+    grid-template-columns: 6.25rem auto 1fr;
+    gap: 0 0.6rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.8rem;
+    opacity: 0.4;
+  }
+
+  /* The name sits in the label column, where a speaker's name would — these
+     are the closest thing the vault has to a speaking part. */
+  .term :global(.trace .tname) {
+    text-align: right;
+  }
+
+  .term :global(.trace .tdetail) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .term :global(.trace .tms) {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.7;
+  }
+
+  .term :global(.trace.failed) {
+    color: var(--me);
+  }
+
+  @media (min-width: 768px) {
+    .term.verbose :global(.trace) {
+      grid-template-columns: 7rem auto 1fr;
+    }
+  }
+
+  /* ------------------------------------------ the terminal's own output */
+
+  /* Help, search results, notices. A grid rather than padded text: the site's
+     face is proportional, so columns cannot be faked with spaces. */
+  .term :global(.sys) {
+    display: grid;
+    grid-template-columns: 6.25rem 1fr;
+    gap: 0.15rem 0.6rem;
+    margin: 0 0 1.3rem;
+    font-size: 0.9rem;
+  }
+
+  .term :global(.sys .sysh) {
+    grid-column: 1 / -1;
+    margin-bottom: 0.35rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.35;
+  }
+
+  .term :global(.sys .sysk) {
+    text-align: right;
+    opacity: 0.5;
+  }
+
+  .term :global(.sys .sysv) {
+    opacity: 0.8;
+  }
+
+  .term :global(.sys a) {
+    text-decoration: underline;
+  }
+
+  @media (min-width: 768px) {
+    .term :global(.sys) {
+      grid-template-columns: 7rem 1fr;
     }
   }
 
