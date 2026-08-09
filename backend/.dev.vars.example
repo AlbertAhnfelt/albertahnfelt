@@ -23,3 +23,15 @@ MCP_AUTH_TOKEN=dev-only-token
 
 # Google AI Studio key for the website chat (/web/chat)
 GEMINI_API_KEY=
+
+# Strava API application (https://www.strava.com/settings/api). Its
+# "Authorization Callback Domain" must be the bare host of SITE_ORIGIN —
+# www.albertahnfelt.com in production, localhost for a local run.
+STRAVA_CLIENT_ID=
+STRAVA_CLIENT_SECRET=
+
+# Public usernames the read-only connectors pull from. In production these live
+# in wrangler.jsonc `vars`; set them here to run the connectors locally.
+# Leaving one empty switches that connector off rather than breaking the run.
+# LETTERBOXD_USERNAME=
+# CHESS_USERNAME=

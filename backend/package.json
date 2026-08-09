@@ -7,7 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "types": "wrangler types",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "smoke": "esbuild scripts/smoke.ts --bundle --platform=node --format=esm --outfile=.wrangler/smoke.mjs --log-level=error && node .wrangler/smoke.mjs"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.8.2",

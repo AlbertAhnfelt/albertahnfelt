@@ -1,0 +1,385 @@
+---
+import Layout from '../layouts/Layout.astro'
+import BackArrow from '../components/BackArrow.astro'
+import MoonCorner from '../components/MoonCorner.astro'
+import NotFound from '../components/NotFound.astro'
+
+// Where the connectors are visible, and the only place Strava can be connected.
+//
+// Same shape as /vault and /abbe: this file is public static HTML and knows
+// nothing. Every status line arrives at runtime from a Worker endpoint that
+// re-validates the session cookie, and signed-out visitors get the ordinary 404
+// rather than a page admitting there is something here.
+//
+// The point of the page is the one thing a nightly cron cannot do for itself:
+// say out loud when it last worked. A connector that stops is otherwise silent
+// until someone notices months of missing films.
+---
+
+<Layout title="404" authTitle="Connections" noindex>
+  <div data-connections>
+    <div data-state="out">
+      <NotFound persist={false} />
+    </div>
+
+    <main data-state="in">
+      <BackArrow href="/" label="Till startsidan" variant="corner" />
+
+      <div class="content">
+        <section class="connections">
+          <h1>Connections.</h1>
+
+          <p class="lede">
+            Nightly at 05:00 UTC. Everything lands in <code>data/</code> in the vault.
+          </p>
+
+          <div data-list></div>
+          <p class="status" data-status hidden></p>
+        </section>
+      </div>
+
+      <MoonCorner variant="bottom-center" />
+    </main>
+  </div>
+</Layout>
+
+<script>
+  type Connector = {
+    source: string
+    label: string
+    configured: boolean
+    reason: string | null
+    lastRunAt: number | null
+    lastOkAt: number | null
+    lastError: string | null
+    consecutiveFailures: number
+    lastNewEvents: number
+  }
+
+  const API = '/api/abbe/web'
+
+  const show = (state: 'out' | 'in') => {
+    document.documentElement.dataset.session = state
+  }
+
+  /** The page ships as a 404, title included — see Layout, and /vault. */
+  const title = (state: 'out' | 'in') => {
+    const root = document.documentElement
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="auth-title"]')
+
+    if (state === 'in') {
+      if (!meta || document.title === meta.content) return
+      root.dataset.publicTitle = document.title
+      document.title = meta.content
+    } else if (root.dataset.publicTitle) {
+      document.title = root.dataset.publicTitle
+    }
+  }
+
+  /** "3 hours ago", "yesterday", "never". Relative, because the question is staleness. */
+  const ago = (at: number | null): string => {
+    if (!at) return 'never'
+    const seconds = Math.round((Date.now() - at) / 1000)
+    if (seconds < 90) return 'just now'
+    const minutes = Math.round(seconds / 60)
+    if (minutes < 60) return `${minutes} min ago`
+    const hours = Math.round(minutes / 60)
+    if (hours < 36) return hours === 1 ? 'an hour ago' : `${hours} hours ago`
+    const days = Math.round(hours / 24)
+    if (days < 14) return days === 1 ? 'yesterday' : `${days} days ago`
+    return `${Math.round(days / 7)} weeks ago`
+  }
+
+  /**
+   * What the row says about itself, and the class that colours it.
+   *
+   * "Stale" is the state worth having. A connector whose last run succeeded
+   * three weeks ago is not failing — there is no error to show — and it is also
+   * not fine, and without a name for that it would sit here looking green while
+   * nothing arrived.
+   */
+  const health = (c: Connector): { label: string; tone: 'ok' | 'warn' | 'bad' | 'off' } => {
+    if (!c.configured) return { label: c.reason ?? 'not configured', tone: 'off' }
+    if (c.lastError) {
+      const times = c.consecutiveFailures > 1 ? ` ×${c.consecutiveFailures}` : ''
+      return { label: `failing${times} — ${c.lastError}`, tone: 'bad' }
+    }
+    if (!c.lastOkAt) return { label: 'waiting for its first run', tone: 'warn' }
+    const days = (Date.now() - c.lastOkAt) / 86_400_000
+    if (days > 3) return { label: `last ran ${ago(c.lastOkAt)}`, tone: 'warn' }
+    return { label: `ran ${ago(c.lastOkAt)}`, tone: 'ok' }
+  }
+
+  const connections = (root: HTMLElement) => {
+    if (root.dataset.wired) return
+    root.dataset.wired = '1'
+
+    const listEl = root.querySelector<HTMLElement>('[data-list]')!
+    const statusEl = root.querySelector<HTMLElement>('[data-status]')!
+
+    const status = (message: string | null) => {
+      statusEl.textContent = message ?? ''
+      statusEl.hidden = !message
+    }
+
+    const render = (connectors: Connector[]) => {
+      listEl.replaceChildren()
+
+      for (const connector of connectors) {
+        const { label, tone } = health(connector)
+
+        const row = document.createElement('div')
+        row.className = 'row'
+
+        const name = document.createElement('div')
+        name.className = 'name'
+        // textContent everywhere: none of this is markup, and `lastError`
+        // carries text from a third party's error response.
+        name.textContent = connector.label
+
+        const state = document.createElement('div')
+        state.className = `state ${tone}`
+        state.textContent = label
+
+        row.append(name, state)
+
+        if (connector.configured && connector.lastNewEvents > 0) {
+          const count = document.createElement('div')
+          count.className = 'count'
+          count.textContent = `+${connector.lastNewEvents} last run`
+          row.append(count)
+        }
+
+        // Strava is the only one with anything to press. The others are a
+        // username in the Worker's config and nothing a browser can help with.
+        if (connector.source === 'strava') {
+          const action = document.createElement('div')
+          action.className = 'action'
+
+          if (connector.configured) {
+            const button = document.createElement('button')
+            button.type = 'button'
+            button.textContent = 'Disconnect'
+            button.addEventListener('click', async () => {
+              button.disabled = true
+              try {
+                await fetch(`${API}/connect/strava/disconnect`, { method: 'POST' })
+                await load()
+              } catch {
+                status('Could not reach the server.')
+              } finally {
+                button.disabled = false
+              }
+            })
+            action.append(button)
+          } else {
+            const link = document.createElement('a')
+            link.className = 'connect'
+            link.href = `${API}/connect/strava`
+            link.textContent = 'Connect'
+            action.append(link)
+          }
+
+          row.append(action)
+        }
+
+        listEl.append(row)
+      }
+    }
+
+    const load = async () => {
+      try {
+        const res = await fetch(`${API}/connectors`, { headers: { accept: 'application/json' } })
+        if (!res.ok) return status('Could not load connectors.')
+        const body = (await res.json()) as { connectors?: Connector[] }
+        render(body.connectors ?? [])
+        status(null)
+      } catch {
+        status('Could not reach the server.')
+      }
+    }
+
+    void load()
+  }
+
+  const signedIn = (root: HTMLElement) => {
+    show('in')
+    title('in')
+    connections(root)
+  }
+
+  const signedOut = () => {
+    show('out')
+    title('out')
+  }
+
+  const resolve = async (root: HTMLElement) => {
+    if (root.dataset.ready) return
+    root.dataset.ready = '1'
+
+    if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview')) {
+      signedIn(root)
+      return
+    }
+
+    if (document.documentElement.dataset.session === 'in') signedIn(root)
+
+    try {
+      const res = await fetch(`${API}/me`, { headers: { accept: 'application/json' } })
+      if (!res.ok) return signedOut()
+      signedIn(root)
+    } catch {
+      // Offline, or the Worker is down. Whatever is on screen stays — see /vault.
+    }
+  }
+
+  const run = () => {
+    for (const root of document.querySelectorAll<HTMLElement>('[data-connections]')) resolve(root)
+  }
+
+  run()
+  document.addEventListener('astro:page-load', run)
+</script>
+
+<style>
+  [data-state] {
+    display: none;
+  }
+
+  :global(html[data-session='out']) [data-state='out'] {
+    display: block;
+  }
+
+  :global(html[data-session='in']) [data-state='in'] {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .content {
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1.5rem 0;
+  }
+
+  .connections {
+    width: 100%;
+    max-width: 36rem;
+    margin-top: 4rem;
+    font-size: 1rem;
+    line-height: 1.6;
+  }
+
+  @media (min-width: 768px) {
+    .content {
+      padding: 3vh 1.5rem 0;
+    }
+
+    .connections {
+      margin-top: 6rem;
+      font-size: 1.05rem;
+    }
+  }
+
+  h1 {
+    font-size: 2.4rem;
+    line-height: 1.2;
+    margin-bottom: 0.75rem;
+  }
+
+  @media (min-width: 768px) {
+    h1 {
+      font-size: 3rem;
+    }
+  }
+
+  .lede {
+    opacity: 0.5;
+    font-size: 0.9rem;
+    margin-bottom: 2.5rem;
+  }
+
+  code {
+    font-size: 0.9em;
+  }
+
+  /* Built with createElement, so they never get Astro's scoping attribute —
+     the same trap documented at length in /vault. :global(), anchored to
+     [data-list], which is in the template and therefore is scoped. */
+
+  [data-list] :global(.row) {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.15rem 1rem;
+    padding: 1.1rem 0;
+    border-top: 1px solid rgba(239, 237, 234, 0.12);
+  }
+
+  [data-list] :global(.row:last-child) {
+    border-bottom: 1px solid rgba(239, 237, 234, 0.12);
+  }
+
+  [data-list] :global(.name) {
+    font-size: 1.05rem;
+  }
+
+  [data-list] :global(.state) {
+    grid-column: 1;
+    font-size: 0.85rem;
+    opacity: 0.55;
+    /* An error message is one long line of somebody else's prose. */
+    overflow-wrap: anywhere;
+  }
+
+  [data-list] :global(.state.bad) {
+    opacity: 0.9;
+    color: #e2807a;
+  }
+
+  [data-list] :global(.state.warn) {
+    opacity: 0.75;
+    color: #d8b26a;
+  }
+
+  [data-list] :global(.count) {
+    grid-column: 1;
+    font-size: 0.8rem;
+    opacity: 0.35;
+  }
+
+  [data-list] :global(.action) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  [data-list] :global(.action button),
+  [data-list] :global(.action .connect) {
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    background: none;
+    border: 1px solid rgba(239, 237, 234, 0.3);
+    border-radius: 999px;
+    padding: 0.3rem 0.9rem;
+    cursor: pointer;
+    display: inline-block;
+    text-decoration: none;
+  }
+
+  [data-list] :global(.action button:hover),
+  [data-list] :global(.action .connect:hover) {
+    border-color: var(--white);
+  }
+
+  [data-list] :global(.action button:disabled) {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .status {
+    opacity: 0.5;
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+  }
+</style>
