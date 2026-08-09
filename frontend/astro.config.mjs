@@ -28,12 +28,8 @@ export default defineConfig({
   site: 'https://albertahnfelt.com',
   integrations: [
     svelte(),
-    // /abbe, /vault and /connections are private surfaces, not something to
-    // invite crawlers into.
-    sitemap({
-      filter: (page) =>
-        !page.includes('/abbe') && !page.includes('/vault') && !page.includes('/connections')
-    })
+    // /abbe and /vault are private surfaces, not something to invite crawlers into.
+    sitemap({ filter: (page) => !page.includes('/abbe') && !page.includes('/vault') })
   ],
   vite: {
     plugins: [deepLinkRewrite],

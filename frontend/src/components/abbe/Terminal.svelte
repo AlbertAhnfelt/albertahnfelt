@@ -42,7 +42,6 @@
   let chats = $state<ChatSummary[]>([])
   let currentId = $state<string | null>(null)
   let rows = $state<Row[]>([])
-  let model = $state<string | null>(null)
   let verbose = $state(false)
 
   let input = $state('')
@@ -84,17 +83,6 @@
 
   /** Past this many seconds the spinner warms, to say it is still working. */
   const SLOW_AFTER_S = 10
-
-  const bootLine = $derived(
-    [
-      'abbe',
-      model,
-      chats.length === 1 ? '1 konversation' : `${chats.length} konversationer`,
-      verbose ? 'verbose' : null,
-    ]
-      .filter(Boolean)
-      .join('   ·   '),
-  )
 
   // Keep the highlighted row inside the list as it narrows under you.
   $effect(() => {
@@ -639,7 +627,6 @@
           title('out')
           return
         }
-        if (me.model) model = me.model
         signedIn()
       })
       .catch(() => {
@@ -673,8 +660,6 @@
         }}
       >
         <h1>Abbe.</h1>
-
-        <p class="boot">{bootLine}</p>
 
         <Transcript {rows} {verbose} />
 
@@ -745,18 +730,12 @@
     --abbe: #7fa6ff;
   }
 
+  /* Carries the full gap down to the transcript on its own. There used to be a
+     system line under here holding most of it. */
   h1 {
     font-size: 2.4rem;
     line-height: 1.2;
-    margin-bottom: 0.6rem;
-  }
-
-  /* The system line under the heading: who is answering, how much history. */
-  .boot {
-    margin: 0 0 2.5rem;
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    opacity: 0.3;
+    margin-bottom: 3.1rem;
   }
 
   /* Aligned with the message column rather than the label column, so both read
