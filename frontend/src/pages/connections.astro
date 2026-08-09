@@ -4,7 +4,9 @@ import BackArrow from '../components/BackArrow.astro'
 import MoonCorner from '../components/MoonCorner.astro'
 import NotFound from '../components/NotFound.astro'
 
-// Where the connectors are visible, and the only place Strava can be connected.
+// Where the connectors are visible. A report, not a control panel: each one is
+// a username in the Worker's config reading a public feed, so there is nothing
+// here to connect and nothing to press.
 //
 // Same shape as /vault and /abbe: this file is public static HTML and knows
 // nothing. Every status line arrives at runtime from a Worker endpoint that
@@ -150,39 +152,10 @@ import NotFound from '../components/NotFound.astro'
           row.append(count)
         }
 
-        // Strava is the only one with anything to press. The others are a
-        // username in the Worker's config and nothing a browser can help with.
-        if (connector.source === 'strava') {
-          const action = document.createElement('div')
-          action.className = 'action'
-
-          if (connector.configured) {
-            const button = document.createElement('button')
-            button.type = 'button'
-            button.textContent = 'Disconnect'
-            button.addEventListener('click', async () => {
-              button.disabled = true
-              try {
-                await fetch(`${API}/connect/strava/disconnect`, { method: 'POST' })
-                await load()
-              } catch {
-                status('Could not reach the server.')
-              } finally {
-                button.disabled = false
-              }
-            })
-            action.append(button)
-          } else {
-            const link = document.createElement('a')
-            link.className = 'connect'
-            link.href = `${API}/connect/strava`
-            link.textContent = 'Connect'
-            action.append(link)
-          }
-
-          row.append(action)
-        }
-
+        // Nothing to press. Every connector here is a username in the Worker's
+        // config reading a public feed, so there is no account to link and
+        // nothing a browser can do about one that is misbehaving. This page
+        // reports; it does not operate.
         listEl.append(row)
       }
     }
@@ -308,9 +281,9 @@ import NotFound from '../components/NotFound.astro'
      [data-list], which is in the template and therefore is scoped. */
 
   [data-list] :global(.row) {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 0.15rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
     padding: 1.1rem 0;
     border-top: 1px solid rgba(239, 237, 234, 0.12);
   }
@@ -324,7 +297,6 @@ import NotFound from '../components/NotFound.astro'
   }
 
   [data-list] :global(.state) {
-    grid-column: 1;
     font-size: 0.85rem;
     opacity: 0.55;
     /* An error message is one long line of somebody else's prose. */
@@ -342,39 +314,8 @@ import NotFound from '../components/NotFound.astro'
   }
 
   [data-list] :global(.count) {
-    grid-column: 1;
     font-size: 0.8rem;
     opacity: 0.35;
-  }
-
-  [data-list] :global(.action) {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: center;
-  }
-
-  [data-list] :global(.action button),
-  [data-list] :global(.action .connect) {
-    font: inherit;
-    font-size: 0.85rem;
-    color: inherit;
-    background: none;
-    border: 1px solid rgba(239, 237, 234, 0.3);
-    border-radius: 999px;
-    padding: 0.3rem 0.9rem;
-    cursor: pointer;
-    display: inline-block;
-    text-decoration: none;
-  }
-
-  [data-list] :global(.action button:hover),
-  [data-list] :global(.action .connect:hover) {
-    border-color: var(--white);
-  }
-
-  [data-list] :global(.action button:disabled) {
-    opacity: 0.4;
-    cursor: default;
   }
 
   .status {

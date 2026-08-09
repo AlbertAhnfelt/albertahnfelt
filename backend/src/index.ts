@@ -164,9 +164,9 @@ export default {
       return handleChats(request, env);
     }
 
-    // Connector status, and the Strava OAuth round trip. Also ahead of the
-    // generic /web/ branch, for the same reason.
-    if (url.pathname === "/web/connectors" || url.pathname.startsWith("/web/connect/")) {
+    // Connector health. Also ahead of the generic /web/ branch, for the same
+    // reason.
+    if (url.pathname === "/web/connectors") {
       return handleConnectors(request, env);
     }
 
@@ -189,9 +189,10 @@ export default {
    *
    * Two schedules, dispatched on which one fired, rather than one handler doing
    * both jobs. They fail for entirely different reasons — the sweep needs
-   * Gemini, the connectors need three third parties — and running them together
-   * would mean a Strava outage could cost a night of conversation logs. An hour
-   * apart, so a long run of one never overlaps the other.
+   * Gemini, the connectors need someone else's website to be up — and running
+   * them together would mean a bad night at chess.com costing a night of
+   * conversation logs. An hour apart, so a long run of one never overlaps the
+   * other.
    */
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (event.cron === CONNECTORS_CRON) {

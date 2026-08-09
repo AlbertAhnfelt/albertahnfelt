@@ -7,7 +7,6 @@
 import { cell, dayOf, monthBounds, monthOf, plain, quote } from "../src/connectors/page";
 import { letterboxd } from "../src/connectors/letterboxd";
 import { chess, pgnFor } from "../src/connectors/chess";
-import { duration, strava } from "../src/connectors/strava";
 import { isDataKey, isWritableKey } from "../src/vault";
 
 let failures = 0;
@@ -110,7 +109,7 @@ const RSS = `<?xml version="1.0" encoding="UTF-8"?>
 <item>
 <title>Sinners, 2025 - &#9733;&#9733;&#9733;&#9733;</title>
 <link>https://letterboxd.com/albert/film/sinners/</link>
-<guid isPermaLink="false">letterboxd-watch-1</guid>
+<guid isPermaLink="false">letterboxd-review-1</guid>
 <letterboxd:watchedDate>2026-08-08</letterboxd:watchedDate>
 <letterboxd:rewatch>No</letterboxd:rewatch>
 <letterboxd:filmTitle>Sinners</letterboxd:filmTitle>
@@ -127,7 +126,7 @@ const RSS = `<?xml version="1.0" encoding="UTF-8"?>
 <letterboxd:filmTitle>Kill|Bill</letterboxd:filmTitle>
 <letterboxd:filmYear>2003</letterboxd:filmYear>
 <letterboxd:memberRating>3.5</letterboxd:memberRating>
-<description><![CDATA[<p><img src="p.jpg"/></p>]]></description>
+<description><![CDATA[<p><img src="p.jpg"/></p> <p>Watched on Saturday August 1, 2026.</p>]]></description>
 </item>
 <item>
 <title>A list of things</title>
@@ -148,10 +147,10 @@ console.log("\nletterboxd:");
 stubFetch({ "https://letterboxd.com/": RSS });
 const lb = await letterboxd.fetch({ LETTERBOXD_USERNAME: "albert" } as never, null);
 check("lists are skipped, diary entries kept", lb.events.length, 2);
-check("guid is the dedupe key", lb.events[0].externalId, "letterboxd-watch-1");
+check("guid is the dedupe key", lb.events[0].externalId, "letterboxd-review-1");
 check("watched date places the event", monthOf(lb.events[0].occurredAt), "2026-08");
 check("review text survives as a quote", lb.events[0].payload.review, "> Loved the & ending.");
-check("no review means no quote", lb.events[1].payload.review, "");
+check("a bare watch keeps no auto-description as a review", lb.events[1].payload.review, "");
 check("rewatch is read", lb.events[1].payload.rewatch, true);
 
 const lbPage = letterboxd.renderMonth("2026-08", lb.events.map(asStored));
@@ -209,43 +208,6 @@ const chPage = chess.renderMonth("2026-08", chEvents);
 ok("opponent pipe is escaped in the table", chPage.includes("ev\\|il"));
 ok("tally is rendered", chPage.includes("1W / 1D / 0L"));
 check("pgn concatenates both games", pgnFor(chEvents).split("[Event").length, 3);
-
-console.log("\nstrava:");
-check("duration under an hour", duration(2530), "42:10");
-check("duration over an hour", duration(5025), "1:23:45");
-check("no duration", duration(0), "—");
-
-stubFetch({
-  "https://www.strava.com/api/v3/athlete/activities": JSON.stringify([
-    {
-      id: 99,
-      name: "Morning |Run",
-      sport_type: "Run",
-      distance: 10000,
-      moving_time: 3000,
-      total_elevation_gain: 120,
-      average_speed: 3.333,
-      average_heartrate: 152.6,
-      start_date: "2026-08-07T05:30:00Z",
-    },
-  ]),
-});
-const st = await strava.fetch(
-  {
-    OAUTH_KV: {
-      get: async () => ({ access_token: "t", refresh_token: "r", expires_at: 9e9 }),
-    },
-  } as never,
-  null,
-);
-check("one activity parsed", st.events.length, 1);
-ok("backfill latches done on a short page", JSON.parse(st.cursor as string).done === true);
-
-const stPage = strava.renderMonth("2026-08", st.events.map(asStored));
-ok("pace is per km for a run", stPage.includes("/km"));
-ok("distance in km", stPage.includes("10.00 km"));
-ok("activity name pipe escaped", stPage.includes("Morning \\|Run"));
-ok("heart rate rounded", stPage.includes("153"));
 
 console.log(failures === 0 ? "\nall passed\n" : `\n${failures} FAILED\n`);
 if (failures > 0) throw new Error(`${failures} smoke check(s) failed`);

@@ -110,8 +110,19 @@ function parseFeed(xml: string): { id: string; at: number; diary: Diary }[] {
     // guid is Letterboxd's own id for the entry and is what makes re-reading
     // the feed idempotent. Falling back to the link keeps an entry with a
     // malformed guid out of the duplicate business.
-    const id = plain(element(item, "guid") ?? element(item, "link") ?? "", 200);
+    const guid = plain(element(item, "guid") ?? "", 200);
+    const id = guid || plain(element(item, "link") ?? "", 200);
     if (!id) continue;
+
+    // The guid also says what kind of entry this is, and it is the only
+    // reliable way to tell a review from a bare diary entry. For an entry with
+    // no review Letterboxd writes its own description — "Watched on Tuesday
+    // July 28, 2026." — which is prose, survives the tag strip like prose, and
+    // would otherwise appear under "Reviews" as though Albert had written it.
+    // Matching that sentence would mean matching an English string that is only
+    // English until someone changes a setting; `letterboxd-review-` is
+    // structural.
+    const reviewed = guid.startsWith("letterboxd-review-");
 
     out.push({
       id,
@@ -121,10 +132,9 @@ function parseFeed(xml: string): { id: string; at: number; diary: Diary }[] {
         year: plain(element(item, "letterboxd:filmYear") ?? "", 8),
         rating: rating(item),
         rewatch: (element(item, "letterboxd:rewatch") ?? "").trim().toLowerCase() === "yes",
-        // The description is HTML in CDATA: a poster image, then the review if
-        // there is one. `quote` strips the markup, so an entry without a review
-        // reduces to nothing and the section is dropped.
-        review: quote(element(item, "description") ?? ""),
+        // The description is HTML in CDATA: a poster image, then the review.
+        // `quote` strips the markup, so what is left is the prose alone.
+        review: reviewed ? quote(element(item, "description") ?? "") : "",
         url: plain(element(item, "link") ?? "", 300),
       },
     });

@@ -26,11 +26,10 @@ import {
   recordRun,
 } from "./store";
 import { isMonth, monthBounds, monthOf, writeDataFile, writeDataPage } from "./page";
-import { strava } from "./strava";
 import type { Connector } from "./types";
 import { DATA_PREFIX, vaultDate } from "../vault";
 
-export const CONNECTORS: Connector[] = [letterboxd, chess, strava];
+export const CONNECTORS: Connector[] = [letterboxd, chess];
 
 export const CONNECTORS_BY_SOURCE = new Map(CONNECTORS.map((c) => [c.source, c]));
 

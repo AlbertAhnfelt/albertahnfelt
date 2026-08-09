@@ -38,7 +38,7 @@
   // Two daily jobs, told apart in `scheduled` by the expression that fired.
   //
   //   04:00 UTC — distil conversations that have gone quiet into ai/log/.
-  //   05:00 UTC — pull Letterboxd, chess.com and Strava into data/.
+  //   05:00 UTC — pull Letterboxd and chess.com into data/.
   //
   // Nothing is being written at either hour, and a failed run has a whole day to
   // be noticed before the next one. An hour apart so a slow connector run can
@@ -51,8 +51,7 @@
   "kv_namespaces": [
     {
       // OAuth grants, tokens (hashed) and dynamically registered clients,
-      // website sessions (hashed) under the `websession:` prefix, and connector
-      // credentials under `conn:` — currently just the Strava token pair.
+      // plus website sessions (hashed) under the `websession:` prefix.
       "binding": "OAUTH_KV",
       "id": "9be72ae12d3b4cf0a326b7ec0ed89895"
     }
@@ -70,8 +69,8 @@
     // Whose public feeds the connectors read. Public usernames, not secrets —
     // and an empty one is how a connector is switched off: `check` reports it as
     // not configured rather than failing.
-    "LETTERBOXD_USERNAME": "",
-    "CHESS_USERNAME": ""
+    "LETTERBOXD_USERNAME": "albertahnfelt",
+    "CHESS_USERNAME": "garlicninja"
   },
   "observability": { "enabled": true }
   // Secrets (set via `wrangler secret put`, never here):
@@ -79,5 +78,4 @@
   //   ALLOWED_EMAILS — comma-separated allowlist of Google accounts
   //   MCP_AUTH_TOKEN — static bearer token for headless agents (bypasses OAuth)
   //   GEMINI_API_KEY — Google AI Studio key, used only by /web/chat
-  //   STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET — Strava API application
 }
