@@ -35,11 +35,18 @@
       "database_id": "90def425-c3be-4e17-a14e-2a32dca57006"
     }
   ],
-  // Once a day, distil conversations that have gone quiet into ai/log/.
-  // 04:00 UTC: nothing is being written then, and a failed run has a whole day
-  // to be noticed before the next one.
+  // Two daily jobs, told apart in `scheduled` by the expression that fired.
+  //
+  //   04:00 UTC — distil conversations that have gone quiet into ai/log/.
+  //   05:00 UTC — pull Letterboxd and chess.com into data/.
+  //
+  // Nothing is being written at either hour, and a failed run has a whole day to
+  // be noticed before the next one. An hour apart so a slow connector run can
+  // never overlap the sweep; if the connectors cron is changed here it must be
+  // changed in CONNECTORS_CRON in src/index.ts too, since the dispatch is a
+  // string match on this text.
   "triggers": {
-    "crons": ["0 4 * * *"]
+    "crons": ["0 4 * * *", "0 5 * * *"]
   },
   "kv_namespaces": [
     {
@@ -58,7 +65,12 @@
     "SITE_ORIGIN": "https://www.albertahnfelt.com",
     "API_BASE_PATH": "/api/abbe",
     // Which model answers on the website. Swap here, no code change.
-    "GEMINI_MODEL": "gemini-3.6-flash"
+    "GEMINI_MODEL": "gemini-3.6-flash",
+    // Whose public feeds the connectors read. Public usernames, not secrets —
+    // and an empty one is how a connector is switched off: `check` reports it as
+    // not configured rather than failing.
+    "LETTERBOXD_USERNAME": "albertahnfelt",
+    "CHESS_USERNAME": "garlicninja"
   },
   "observability": { "enabled": true }
   // Secrets (set via `wrangler secret put`, never here):

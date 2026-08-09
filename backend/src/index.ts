@@ -3,14 +3,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { isAuthorized } from "./auth";
 import { handleChat } from "./chat";
+import { runConnectors } from "./connectors/run";
 import { DISTILL_INSTRUCTIONS } from "./log";
 import googleHandler, { type GrantProps } from "./oauth-google";
 import { sweep } from "./sweep";
 import { handleChats } from "./web-chats";
+import { handleConnectors } from "./web-connectors";
 import { handleVault } from "./web-vault";
 import { handleWebSession } from "./web-session";
 import { FALLBACK_INSTRUCTIONS, loadInstructions } from "./vault";
 import { TOOLS } from "./vault-tools";
+
+/**
+ * Which cron expression belongs to the connectors. Must match the second entry
+ * in `triggers.crons` — Cloudflare identifies a schedule by its text, so this
+ * is a string equality against the config and not a schedule of its own.
+ */
+const CONNECTORS_CRON = "0 5 * * *";
 
 /**
  * What the Durable Object sees. `email`/`name` arrive from the OAuth grant (absent
@@ -155,6 +164,12 @@ export default {
       return handleChats(request, env);
     }
 
+    // Connector health. Also ahead of the generic /web/ branch, for the same
+    // reason.
+    if (url.pathname === "/web/connectors") {
+      return handleConnectors(request, env);
+    }
+
     if (url.pathname.startsWith("/web/")) {
       return handleWebSession(request, env);
     }
@@ -170,10 +185,20 @@ export default {
   },
 
   /**
-   * The nightly cron (see `triggers` in wrangler.jsonc). Distils website
-   * conversations that have gone quiet into the vault's log.
+   * The nightly crons (see `triggers` in wrangler.jsonc).
+   *
+   * Two schedules, dispatched on which one fired, rather than one handler doing
+   * both jobs. They fail for entirely different reasons — the sweep needs
+   * Gemini, the connectors need someone else's website to be up — and running
+   * them together would mean a bad night at chess.com costing a night of
+   * conversation logs. An hour apart, so a long run of one never overlaps the
+   * other.
    */
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === CONNECTORS_CRON) {
+      ctx.waitUntil(runConnectors(env));
+      return;
+    }
     ctx.waitUntil(sweep(env));
   },
 } satisfies ExportedHandler<Env>;

@@ -23,3 +23,9 @@ MCP_AUTH_TOKEN=dev-only-token
 
 # Google AI Studio key for the website chat (/web/chat)
 GEMINI_API_KEY=
+
+# Public usernames the read-only connectors pull from. In production these live
+# in wrangler.jsonc `vars`; set them here to run the connectors locally.
+# Leaving one empty switches that connector off rather than breaking the run.
+# LETTERBOXD_USERNAME=
+# CHESS_USERNAME=

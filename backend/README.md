@@ -8,6 +8,51 @@ whole pages via `read_page`). Design doc: vault `ai/Abbe Architecture.md`.
 
 Mirrors the Obsidian vault: `external/` is read-only source material;
 `human/`, `wiki/` and `ai/` are AI-writable. Deleted pages land in `wiki/.trash/`.
+`data/` is written by the connectors and by nothing else — see below.
+
+## Connectors
+
+Nightly at 05:00 UTC (`src/connectors/`), pulling Albert's own accounts into
+`data/letterboxd/` and `data/chess/`.
+
+Two layers, deliberately. Raw events live in D1 (`connector_events`, keyed by
+`(source, external_id)` so re-reading a window is a no-op); the vault pages are
+*rendered from D1* on every run and hold no state of their own. That is what
+makes a re-run safe, a backfill able to correct history, and a page able to fix
+itself after a bad deploy.
+
+- **Letterboxd** — public RSS (`/<user>/rss/`). Their API is not granted for
+  personal or LLM use, so RSS is the supported route. It is a ~50-entry window,
+  so this keeps up with the present but cannot backfill; the back catalogue
+  needs their CSV export.
+- **Chess.com** — published-data API, no key, monthly archives. Also writes
+  `data/chess/<month>.pgn`, which is the archive proper.
+
+Both read a public feed keyed by a username in `wrangler.jsonc`, so there is no
+credential here and nothing to connect. An empty username switches that
+connector off rather than failing the run.
+
+Strava was built and then removed (see git history, `abbe-connectors`): their
+API now requires a paid subscription. Adding it back means restoring
+`connectors/strava.ts`, its OAuth endpoints, and the `conn:` KV prefix its
+rotating refresh token lived in — the `Connector` interface it was written
+against has not changed.
+
+`data/` is **not** in `WRITABLE_PREFIXES`: the MCP tools and the website chat can
+read these pages but cannot write them, because anything they wrote would be
+overwritten by the next run. Text arriving from a third party — a film title, an
+opponent's username — is escaped for markdown structure and any prose is
+blockquoted, since these pages are read back by a model that holds write tools.
+
+State and health live in `connector_state`, surfaced at `GET /web/connectors`
+and on `/connections`. The failure this is built around is a connector dying
+silently in March and being noticed in November.
+
+`npm run smoke` drives both with canned responses — no network, no credentials —
+covering the parsers, the escaping and the Stockholm month maths. `npm run live`
+renders the pages from real feed bodies saved to `/tmp` (curl commands are in
+`scripts/live-check.ts`), which is how to look at output before any of it
+reaches the vault.
 
 ## MCP tools
 
