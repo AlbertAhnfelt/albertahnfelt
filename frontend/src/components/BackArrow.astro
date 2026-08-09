@@ -16,6 +16,12 @@ const { href, label, variant = 'sidebar' } = Astro.props
     position: absolute;
     top: 1.5rem;
     left: 1.5rem;
+    /* An overlay in the corner has to outrank whatever it sits over, and with
+       z-index auto it does not: /abbe's sidebar is sticky, therefore positioned
+       too, and comes later in the DOM, so it painted on top and swallowed every
+       click on the arrow. Only on a wide screen, where the rail starts at the
+       very top — which is why this looked like it worked most of the time. */
+    z-index: 2;
   }
 
   .back img {
